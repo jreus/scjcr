@@ -1,0 +1,71 @@
+# Global Macros
+pdef: 
+ rewritePattern: "
+
+(
+
+Pdef(\\p@1@, Pbind(*[
+
+instrument: \\default,
+
+amp: 0.5, 
+
+dur: 1/2, 
+
+delta: 1/2, 
+
+root: 0, 
+
+octave: 4, 
+
+scale: Scale.lydian, 
+
+//note: 0, 
+
+degree: Pseq((0..7), inf), 
+
+out: 0, 
+
+]));
+
+);
+
+Pdef(\\p@1@).play(TempoClock, quant: TempoClock.beatsPerBar);
+
+Pbindef(\\p@1@, \\amp, 0.5, \\note, Pseq((0..12), inf));
+
+Pdef(\\p@1@).pause;
+
+"
+ inputPattern: "pdef([0-9]+)"
+ type: "rewrite"
+boot: 
+ rewritePattern: "(
+
+s.options.numInputBusChannels = @1@; s.options.numOutputBusChannels = @1@; s.options.memSize = 65536; s.options.blockSize = 256; s.options.numWireBufs = 512;
+
+s.waitForBoot { if(m.notNil) { m.window.close }; m = s.meter; m.window.alwaysOnTop=true; m.window.front; b = m.window.bounds; l = Window.screenBounds.width - b.width; m.window.bounds = Rect(l, 0, b.width, b.height);
+ Syn.load; Macros.load;
+};
+
+);"
+ actionFunc: '{ ServerOptions.devices.postln }'
+ inputPattern: "boot/([0-9]+)"
+ type: "rewrite"
+syn: 
+ rewritePattern: "Synth(\\@1@)"
+ inputPattern: "syn/([A-Za-z0-9_]+)"
+ type: "command"
+ndef: 
+ rewriteFunc: '{|input,args|
+					if(~nMacroNdefs.notNil) { ~nMacroNdefs = ~nMacroNdefs + 1 } { ~nMacroNdefs = 0 };
+"(\n
+Ndef(\\n%, {arg amp=1.0, pan=0;\n
+\tvar sig;\n
+\tsig = SinOsc.ar(440) * EnvGen.ar(Env.perc, Impulse.ar(1));\n
+});\n
+);\n
+Ndef(\\n%).play(out:0, numChannels: 1);\n".format(~nMacroNdefs, ~nMacroNdefs);
+			}'
+ inputPattern: "ndef"
+ type: "rewrite"

@@ -1,0 +1,106 @@
+<?xml version="1.0" ?>
+<!-- Default SC Macros -->
+<xml>
+
+<macro name="boot" evalString="">
+<rewrite>(
+s.options.numInputBusChannels = 10; s.options.numOutputBusChannels = 10;
+s.options.memSize = 65536; s.options.blockSize = 256;
+s.waitForBoot { Syn.load };
+);</rewrite>
+<action>{ ServerOptions.devices.postln }</action>
+</macro>
+
+<macro name="pdef" evalString="">
+<rewrite>Pdef('p01').play(quant: 1);
+Pdef('p01').stop;
+(
+Pdef('p01', Pbind(*[
+    instrument: 'default',
+    degree: Pseq([0,2,4,6,8],inf),
+    dur: 1,
+    amp: 1.0,
+    pan: 0,
+    out: 0
+]
+));
+);</rewrite>
+<action></action>
+</macro>
+
+<macro name="ndef" evalString="">
+<rewrite>(
+Ndef('xxx', {arg amp=1.0, pan=0, out=10;
+    var sig;
+    sig = SinOsc.ar();
+    Out.ar(10, Pan2.ar(sig, pan, amp));
+}).play;
+);</rewrite>
+<action></action>
+</macro>
+
+<macro name="mix" evalString="">
+<rewrite>(
+Ndef('mix', {arg master=1.0;
+    var mix;
+    var in1,in2,in3,in4,in5,in6,in7,in8,in9;
+    in1 = In.ar(10, 2); in2 = In.ar(20, 2); in3 = In.ar(30, 2); in4 = In.ar(40, 2); in5 = In.ar(50, 2);
+    in6 = In.ar(60, 2); in7 = In.ar(70, 2); in8 = In.ar(80, 2); in9 = In.ar(90, 2);
+    mix = Mix([in1,in2,in3,in4,in5]);
+    mix = Limiter.ar(mix, 0.999, 0.001);
+    mix = LeakDC.ar(mix);
+    Out.ar(0, mix * master);
+}).play;
+);</rewrite>
+<action></action>
+</macro>
+
+
+</xml>
+
+
+
+<!--
+this.add('setmix',"Ndef('mix').set('master', 0.0);");
+this.add('pmono',
+"
+Pdef('p01').play(quant: 1);
+Pdef('p01').stop;
+(
+Pdef('p01', Pmono(*[
+\tinstrument: 'default',
+\tdegree: Pseq([0,2,4,6,8],inf),
+\tdur: 1,
+\tamp: 1.0,
+\tpan: 0,
+\tout: 0
+]
+));
+);"
+);
+this.add('sdef',
+"(
+SynthDef('xxx', {arg out, amp=1.0, pan=0, freq=440, gate=1, atk=0.1, dec=0.1, sus=0.8, rel=0.1;
+var sig, env;
+env = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
+sig = WhiteNoise.ar();
+sig = sig * env;
+Out.ar(out, Pan2.ar(sig, pan, amp));
+}).add;
+);"
+);
+this.add('play',
+"(
+{
+Out.ar(0, SinOsc.ar(1400) * EnvGen.ar(Env.perc, timeScale: 0.1, doneAction: 2));
+}.play(s);
+);
+"
+);
+this.add('eq4',
+"
+sig = BLowShelf.ar(BPeakEQ.ar(BPeakEQ.ar(BHiShelf.ar(sig, 10000, 1, 0), 4000, 1, 0), 1200, 1, 0), 200, 1, 0);
+"
+);
+
+-->
