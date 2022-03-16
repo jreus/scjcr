@@ -52,7 +52,11 @@ vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
 vr=cutoff modulator rate hz (float)
 
 gn:  gain stage
-lv=gain level (float: 0-1)
+db=gain boost/cut in db (float: -60 - 60)
+
+pan: mix to mono and pan
+ps=pan position (float: 0-1) 0.5 is center
+db=gain boost/cut in db (float: -60 - 60)
 
 in: mono signal mic input (SoundIn)
 bs=index of audio input bus (int)
@@ -73,6 +77,22 @@ del: delay
 dt=delay time in seconds (float)
 dy=decay time in seconds (float)
 mx=dry/wet mix (float)
+
+eq3: 3 band eq
+lf=low frequency
+mf=mid frequency
+hf=high frequency
+lo=boost/cut in db
+mi=boost/cut in db
+hi=boost/cut in db
+lq=recip q low
+mq=recip q mid
+hq=recip q high
+
+eq: single band eq
+cf=center frequency
+db=cut/boost in db
+rq=reciprocal of q
 
 rev: reverb JPverb
 vt=reverb time in seconds, does not effect early reflections
@@ -363,19 +383,31 @@ FXUnit {
 			\xin, Dictionary.newFrom([\bs, [Integer, 0], \ch, [Integer, 2], \pr, [Float, 1.0],
 				\pn, [Float, nil]]),
 
-			\gn, Dictionary.newFrom([\lv, [Float, 1.0]]),
+			\gn, Dictionary.newFrom([\db, [Float, 0.0]]),
+
+			// pan position (0-1), level
+			\pan, Dictionary.newFrom([\ps, [Float, 0.5], \db, [Float, 0.0]]),
 
 			// distortion type, preamp, preamp_variation, preamp_var_type, preamp_var_rate, mix
 			\ws, Dictionary.newFrom([\ty, [Integer, 1], \pr, [Float, 20], \pv, [Float, 2],
 				\vt, [Integer, 1], \vr, [Float, 1], \mx, [Float, 0.8]]),
 
-			// cutoff (hz), co_variation (hz), co_var_type, co_var_rate, recip Q,
-			\lpf, Dictionary.newFrom([\co, [Float, 1200], \cv, [Float, 200], \vt, [Integer, 1],
-				\vr, [Float, 0.5], \rq, [Float, 0.7]]),
+			// center freq, reciprocal of q, db cut/boost
+			\eq, Dictionary.newFrom([\cf, [Float, 100], \rq, [Float, 1.0], \db, [Float, 0.0]]),
 
-			// cutoff (hz), co_variation (hz), co_var_type, co_var_rate, recip Q,
-			\hpf, Dictionary.newFrom([\co, [Float, 3000], \cv, [Float, 1000], \vt, [Integer, 1],
-				\vr, [Float, 1], \rq, [Float, 0.5]]),
+			// low cf, mid cf, high cf, low rq, mid rq, high rq, low db, mid db, high db
+			\eq3, Dictionary.newFrom([\lf, [Float, 200], \mf, [Float, 1000], \hf, [Float, 4000],
+				\lq, [Float, 5.0], \mq, [Float, 1.0], \hq, [Float, 5.0],
+				\lo, [Float, 0.0], \mi, [Float, 0.0], \hi, [Float, 0.0]
+			]),
+
+			// cutoff (hz), recip Q, co_variation (hz), co_var_type, co_var_rate
+			\lpf, Dictionary.newFrom([\co, [Float, 1200], \rq, [Float, 0.7],
+				\vt, [Integer, 1], \cv, [Float, 10],\vr, [Float, 0.5]]),
+
+			// cutoff (hz), recip Q, co_variation (hz), co_var_type, co_var_rate
+			\hpf, Dictionary.newFrom([\co, [Float, 1000], \rq, [Float, 0.7],
+				\vt, [Integer, 1], \cv, [Float, 10],\vr, [Float, 0.5]]),
 
 			// delay time, decay, mix
 			\del, Dictionary.newFrom([\dt, [Float, 0.5], \dy, [Float, 0.5], \mx, [Float, 0.5]]),
@@ -394,6 +426,8 @@ FXUnit {
 				\s_, [Symbol, nil], \sb, [Integer, nil], \sl, [Float, 1.0], \mx, [Float, 1.0]]),
 
 
+
+
 		]);
 
 		// Build regexp patterns for each stage's params
@@ -405,7 +439,7 @@ FXUnit {
 				};
 				stageSpec[\paramRegex] = stageSpec[\paramRegex] ++ paramName.asString;
 			};
-			stageSpec[\paramRegex] = "(%)([\\.0-9a-zA-Z_]+)".format(stageSpec[\paramRegex]);
+			stageSpec[\paramRegex] = "(%)([\-\\.0-9a-zA-Z_]+)".format(stageSpec[\paramRegex]);
 		};
 
 		// Build general FX stage parsing regex
@@ -416,7 +450,7 @@ FXUnit {
 			};
 			stageRegex = stageRegex ++ stageName.asString;
 		};
-		stageRegex = "(%|[a-zA-Z0-9_]+)(\\([\ \\.a-zA-Z_0-9]*\\))".format(stageRegex);
+		stageRegex = "(%|[a-zA-Z0-9_]+)(\\([\ \\-\\.a-zA-Z_0-9]*\\))".format(stageRegex);
 
 		"FX: Compiled stage regex: '%'".format(stageRegex).warn;
 	}
@@ -541,7 +575,7 @@ FXUnit {
 
 						},
 						Float, {
-							if(paramVal.isFloat) {
+							if(paramVal.isFloat.or {paramVal.isInteger}) {
 								paramVal = paramVal.asFloat;
 							} {
 								LangError("Invalid float param value '%' '%'".format(paramName, paramVal)).throw;
@@ -601,9 +635,15 @@ FXUnit {
 					var outbus = st[\bs], preamp = st[\pr];
 					dsp.add("Out.ar('%_bs'.kr(%), sig * '%_pr'.kr(%));".format(sid, outbus, sid, preamp));
 				},
-				\gn, { // GAIN lv
-					var gainlevel = st[\lv];
-					dsp.add("sig = sig * '%_mx'.kr(%);".format(sid, gainlevel));
+				\gn, { // GAIN db
+					var gainlevel = st[\db];
+					dsp.add("sig = sig * '%_db'.kr(%);".format(sid, gainlevel.dbamp));
+				},
+				\pan, { // PAN ps,db
+					var panpos = st[\ps], gainlevel = st[\db];
+					dsp.add("sig = Pan2.ar(Mix.new(sig), '%_ps'.kr(%), '%_db'.kr(%));".format(sid, panpos, sid, gainlevel.dbamp));
+
+
 				},
 				\ws, { // WAVESHAPER ty,pr,pv,vt,vr,mx
 					var ws_type = st[\ty], preamp = st[\pr], prevar = st[\pv];
@@ -624,6 +664,16 @@ FXUnit {
 
 						} { LangError("Invalid preamp variation type % to ws".format(prevar_type)).throw };
 					} { LangError("Invalid waveshaper type '%'".format(ws_type)).throw };
+				},
+				\eq, { // SINGLE BAND PARAMETRIC EQ cf, rq, db
+					var cf = st[\cf], rq = st[\rq], db = st[\db];
+					dsp.add("sig = BPeakEQ.ar(sig, '%_cf'.kr(%), '%_rq'.kr(%), '%_db'.kr(%));".format(sid, cf, sid, rq, sid, db));
+				},
+				\eq3, { // 3BAND PARAMETRIC EQ lf, mf, hf, lq, mq, hq, lo, mi, hi
+					var lf = st[\lf], lq = st[\lq], lo = st[\lo];
+					var mf = st[\mf], mq = st[\mq], mi = st[\mi];
+					var hf = st[\hf], hq = st[\hq], hi = st[\hi];
+					dsp.add("sig = BPeakEQ.ar(BPeakEQ.ar(BPeakEQ.ar(sig, '%_lf'.kr(%), '%_lq'.kr(%), '%_lo'.kr(%)), '%_mf'.kr(%), '%_mq'.kr(%), '%_mi'.kr(%)), '%_hf'.kr(%), '%_hq'.kr(%), '%_hi'.kr(%));".format(sid, lf, sid, lq, sid, lo, sid, mf, sid, mq, sid, mi, sid, hf, sid, hq, sid, hi));
 				},
 				\lpf, { // LOW PASS FILTER co, cv, vt, vr, rq
 					var cutoff = st[\co], covar = st[\cv], rq = st[\rq];
@@ -659,7 +709,7 @@ FXUnit {
 				\rev, { // REVERB vt, dm, vs, er, mx, lo, mi, hi
 					var verbtime=st[\vt], damping=st[\dm], verbsize=st[\vs];
 					var earlyref=st[\er], lows=st[\lo], mids=st[\mi], highs=st[\hi], mix=st[\mx];
-					dsp.add("v1 = JPverb.ar(sig, '%_vt'.kr(%), '%_da'.kr(%), '%_vs'.kr(%), '%_er'.kr(%), 0.8, 0.9, '%_lo'.kr(%), '%_mi'.kr(%), '%_hi'.kr(%), 200, 3000);".format(sid, verbtime, sid, damping, sid, verbsize, sid, earlyref, sid, lows, sid, mids, sid, highs));
+					dsp.add("v1 = JPverb.ar(sig, '%_vt'.kr(%), '%_dm'.kr(%), '%_vs'.kr(%), '%_er'.kr(%), 0.8, 0.9, '%_lo'.kr(%), '%_mi'.kr(%), '%_hi'.kr(%), 200, 3000);".format(sid, verbtime, sid, damping, sid, verbsize, sid, earlyref, sid, lows, sid, mids, sid, highs));
 					dsp.add("sig = v1.madd('%_mx'.kr(%)) + sig.madd( 1 - '%_mx'.kr);".format(sid, mix, sid));
 
 				},

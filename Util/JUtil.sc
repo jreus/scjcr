@@ -266,12 +266,12 @@ Etc.
 
 	// Test if a string is a valid float
 	isFloat {
-		^"^[0-9]+[\.][0-9]*$".matchRegexp(this);
+		^"^[\-]?[0-9]+[\.][0-9]*$".matchRegexp(this);
 	}
 
 	// Test if a string is a valid int
 	isInteger {
-		^"^[0-9]+$".matchRegexp(this);
+		^"^[\-]?[0-9]+$".matchRegexp(this);
 	}
 }
 
