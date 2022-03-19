@@ -14,8 +14,7 @@ Singleton {
 		^all[this] ?? IdentityDictionary()
 	}
 
-	*new {
-		arg name ...settings;
+	*new {arg name ...settings;
 		var sing, classAll, created=false;
 
 		name = name ?? this.default;
