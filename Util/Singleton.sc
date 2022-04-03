@@ -78,9 +78,9 @@ Singleton {
 		// Override this to receive 'settings' parameter from Singleton.new(name, settings)
 	}
 
-	*clear {
-		|sing|
+	*clear {|sing|
 		var dict = all[this];
+		"Clearing Singletons %".format(dict).warn;
 		if (dict.notNil) {
 			var key = dict.findKeyForValue(sing);
 			if (key.notNil) {

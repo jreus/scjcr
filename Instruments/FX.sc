@@ -129,19 +129,36 @@ FX : SymbolProxyManager {
 	var <units;
 	var <cleanbus; // send clean signals here
 	var <fxbus; // used internally to send from fxmixproxy to masterSynth
-	var <fxmixproxy;
-	var <mastersynth; // final signal mixing, limiting & volume stage before audio hardware
+	var <fxmixproxy; // mixpoint of different FX busses
+	var <masterproxy; // final mastering, limiting & volume stage before going to audio hardware
 
 	classvar <>verbose=true;
 	classvar <singleton;
 
-	*new {|serv, group|
+	*initClass {
+		CmdPeriod.add({FX.freeAll});
+	}
+
+	*new {|serv, group, outbus, onComplete|
 		if(singleton.isNil) {
-			^super.new.init(serv, group);
+			^super.new.init(serv, group, outbus, onComplete);
 		} {
 			^singleton;
 		}
 	}
+
+	*freeAll {
+		if(singleton.notNil) {
+			singleton.freeAll;
+			singleton = nil;
+		};
+	}
+
+	freeAll {
+		"Free All FX".warn;
+		units.keys.do {|key| this.freeUnit(key) };
+	}
+
 
 	*getManager {
 		if(singleton.isNil) {
@@ -158,15 +175,15 @@ FX : SymbolProxyManager {
 	//   but sometimes you might want to, for example, sending the signal to an
 	//   external app via a virtual audio bus
 	master {|outbus=0, gain=1.0|
-		if(this.mastersynth.notNil) {
-			this.mastersynth.set(\outbus, outbus, \gain, gain);
+		if(this.masterproxy.notNil) {
+			this.masterproxy.set(\out, outbus, \gain, gain);
 		};
 	}
 
-	init {|serv, group|
+	init {|serv, group, outbus=0, onComplete=nil|
 		server = serv;
 
-		"Setting Ndef.defaultServer to '%'".format(server).warn;
+		"FX: Setting Ndef.defaultServer to '%'".format(server).warn;
 		Ndef.defaultServer = server;
 
 		if (group.isNil) {
@@ -174,7 +191,7 @@ FX : SymbolProxyManager {
 		};
 
 		fxgroup = group;
-		"Found fx group %".format(fxgroup).warn;
+		"FX: Found fx group %".format(fxgroup).warn;
 
 		this.loadSynthDefsEventTypes();
 
@@ -184,43 +201,48 @@ FX : SymbolProxyManager {
 		fxbus = Bus.audio(server, 2);
 		fxmixproxy = NodeProxy.new(server, \audio, 2);
 		//fxmixproxy.setGroup(fxgroup);
-		fxmixproxy.play(out: fxbus, numChannels: 2, group: fxgroup, multi: true, addAction: \addToHead);
+		//fxmixproxy.play(out: fxbus, numChannels: 2, group: fxgroup, multi: true, addAction: \addToHead);
 		singleton = this;
-
-		// Create master node
-		// mastersynth = {|gain=1.0, fxbus, cleanbus, outbus=0|
-		// 	var mix, fxsig, cleansig;
-		// 	cleansig = In.ar(cleanbus, 2);
-		// 	fxsig = In.ar(fxbus, 2);
-		// 	mix = cleansig+fxsig;
-		// 	mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
-		// 	//Out.ar(outbus, mix * gain);
-		// 	mix * gain;
-		// }.play(target: server, outbus: 0, addAction: \addToTail);
-
-
 
 		{
 			server.sync;
-			if(mastersynth.isNil) {
-				"FX: Creating master node".postln;
-				mastersynth = Synth(\mixMaster, [
-					\fxbus, fxbus,
-					\cleanbus, cleanbus
-				], fxgroup, \addToTail);
+			if(masterproxy.isNil) {
+				"FX: Creating master node".warn;
+
+				// mastersynth = Synth(\mixMaster, [
+				// 	\fxbus, fxbus,
+				// 	\cleanbus, cleanbus
+				// ], server, \addToTail);
+
+				masterproxy = NodeProxy.new(server, \audio, 2);
+				masterproxy.play(out: outbus, numChannels: 2, group: fxgroup, multi: false, addAction: \addToTail);
+				"FX: Setting masterproxy.source".postln;
+				masterproxy.source = {|gain=1.0|
+					var mix, fxmix, clean;
+					clean = In.ar(cleanbus, 2);
+					fxmix = fxmixproxy.ar(2);
+					mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
+					mix = Limiter.ar(LeakDC.ar(mix), 1.0, 0.001);
+					mix * gain;
+				};
+
 
 			};
+			"FX: Finished audiochain setup".warn;
+			if(onComplete.notNil) {
+				onComplete.value(this);
+			};
+
 		}.fork(AppClock);
 
 	}
-
 
 	loadSynthDefsEventTypes {
 		SynthDef(\mixMaster, {|gain=1.0, fxbus, cleanbus, outbus=0|
 			var mix, fxsig, cleansig;
 			cleansig = In.ar(cleanbus, 2);
 			fxsig = In.ar(fxbus, 2);
-			mix = cleansig+fxsig;
+			mix = cleansig + fxsig;
 			mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
 			Out.ar(outbus, mix * gain);
 		}).add;
@@ -242,6 +264,7 @@ FX : SymbolProxyManager {
 		};
 		^res;
 	}
+
 
 	// Remove a given unit by name and free its resources....
 	freeUnit {|name|
