@@ -695,7 +695,7 @@ Collections
 	Will be received in SC as the array...
 	[ /to_sc, "sim", "t", 162.12, "Xarray", "[", 22.17, 21.77, -66.43, "]", "Yarray", "[", "0.271, 0.383, "]" ]
 
-	This method searches the target array for [ and ] string literals beginning at start_idx
+	This method searches the target array for [ and ] string/char literals beginning at start_idx
 	if an array is found this method returns an array containing two elements:
 	0: the array that was found  1: the index directly following the end of the found array in the receiver
 	element 0 will be an empty array if no array was found
@@ -711,7 +711,7 @@ Collections
 		var complete = false;
 		while ({ (arrayFound == false).and({ idx < this.size }) }, {
 			//"Read: %   Type: %".format(this[idx], this[idx].class).postln;
-			if(this[idx] == "[") {
+			if(this[idx].asString == "[") {
 				arrayFound = true;
 			};
 			idx = idx+1;
@@ -719,7 +719,7 @@ Collections
 
 		while ( { (complete == false).and( { idx < this.size } ) }, {
 			//"Read: %   Type: %".format(this[idx], this[idx].class).postln;
-			if(this[idx] == "]") {
+			if(this[idx].asString == "]") {
 				complete = true;
 			} {
 				res.add(this[idx]);
