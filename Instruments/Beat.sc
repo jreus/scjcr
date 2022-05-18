@@ -305,8 +305,8 @@ EventSequence {
 	var <pitchPatternString;
 	var <durationScale=1.0;
 	var <eventPanning=0.0;
-	var <zeroDegree=0;
-	var <zeroOctave=5;
+	var <zDegree=0;
+	var <zOctave=5;
 	var <pitchScale;
 	var <fixedStepDelta;
 
@@ -451,29 +451,48 @@ EventSequence {
 		^this;
 	}
 
+
 	// pitch of 0 degree in scale-based notation :
-	//             a note symbol \c5 or a scale degree
+	//             a note symbol \c5 or a frequency
 	// combines root and octave in the event pitch model
 	zeroPitch {|newzeropitch|
 		if(newzeropitch.notNil) {
+			if(newzeropitch.isKindOf(Number)) {
+				newzeropitch = newzeropitch.cpsname;
+			};
+
 			if(newzeropitch.isKindOf(Symbol)) {
 				// note symbol
 				var rt, oct;
 				#rt, oct = newzeropitch.rootOctave;
-				zeroDegree = rt;
-				zeroOctave = oct;
+				zDegree = rt;
+				zOctave = oct;
 			} {
-				if(newzeropitch.isKindOf(Number)) {
-					// degree set independently of octave
-					// could also belong to a non 12TET scale
-					zeroDegree = newzeropitch.asInteger;
-				} {
 					"Invalid zero pitch '%' must be a note symbol or integer degree".format(newzeropitch).throw;
-				};
 			};
 
 			if(pbindef.notNil) {
-				Pbindef(pdefId, \root, zeroDegree, \octave, zeroOctave);
+				Pbindef(pdefId, \root, zDegree, \octave, zOctave);
+			};
+		};
+		^this;
+	}
+
+	zeroDegree {|newzeroDegree|
+		if(newzeroDegree.notNil) {
+			zDegree = newzeroDegree;
+			if(pbindef.notNil) {
+				Pbindef(pdefId, \root, zDegree, \octave, zOctave);
+			};
+		};
+		^this;
+	}
+
+	zeroOctave {|newzeroOctave|
+		if(newzeroOctave.notNil) {
+			zOctave = newzeroOctave;
+			if(pbindef.notNil) {
+				Pbindef(pdefId, \root, zDegree, \octave, zOctave);
 			};
 		};
 		^this;
@@ -759,8 +778,8 @@ SampleSequence : EventSequence {
 		pb = Dictionary.new;
 		pb.put( \type, \smpl);
 		pb.put( \scale, pitchScale );
-		pb.put( \root, zeroDegree );
-		pb.put( \octave, zeroOctave );
+		pb.put( \root, zDegree );
+		pb.put( \octave, zOctave );
 		pb.put( \pan, eventPanning);
 		pb.put( \out, trackBus ); // output is always to the track insert bus
 
@@ -1198,8 +1217,8 @@ SynthSequence : EventSequence {
 		pb[\amp] = Pseq(pb[\amp], inf);
 
 		pb.put( \scale, pitchScale );
-		pb.put( \root, zeroDegree );
-		pb.put( \octave, zeroOctave );
+		pb.put( \root, zDegree );
+		pb.put( \octave, zOctave );
 
 		pb.put( \pan, eventPanning );
 

@@ -535,7 +535,7 @@ Allow direct manipulation of sequence name symbols....
 		};
 
 		^res;
-    }
+	}
 
 	checkIsNoteSymbol {
 		if(this.asString.isNoteSymbol.not) {
@@ -683,6 +683,59 @@ Collections
 	tp {|semitones| ^this.collect(_.tp(semitones)); }
 
 	transpose {|semitones| ^this.tp(semitones); }
+
+	/*
+	When arrays are sent from other languages (e.g. Python) as OSC arguments,
+	often the array is encoded with actual string literals "[" "]" marking the bounds
+	of values.
+
+	For example, the osc message with 7 arguments...
+	/to_sc sim t 162.12 Xarray [22.17, 21.77, -66.43] Yarray [0.271, 0.383]
+
+	Will be received in SC as the array...
+	[ /to_sc, "sim", "t", 162.12, "Xarray", "[", 22.17, 21.77, -66.43, "]", "Yarray", "[", "0.271, 0.383, "]" ]
+
+	This method searches the target array for [ and ] string literals beginning at start_idx
+	if an array is found this method returns an array containing two elements:
+	0: the array that was found  1: the index directly following the end of the found array in the receiver
+	element 0 will be an empty array if no array was found
+
+	Note, this allows repeatedly searching an OSC message for sequential embedded arrays
+	#arr1, idx = msg.parseOscArray();
+	#arr2, idx = msg.parseOscArray(idx);
+	*/
+	parseOscArray {|start_idx=0|
+		var res = List.new();
+		var idx = start_idx;
+		var arrayFound = false;
+		var complete = false;
+		while ({ (arrayFound == false).and({ idx < this.size }) }, {
+			//"Read: %   Type: %".format(this[idx], this[idx].class).postln;
+			if(this[idx] == "[") {
+				arrayFound = true;
+			};
+			idx = idx+1;
+		});
+
+		while ( { (complete == false).and( { idx < this.size } ) }, {
+			//"Read: %   Type: %".format(this[idx], this[idx].class).postln;
+			if(this[idx] == "]") {
+				complete = true;
+			} {
+				res.add(this[idx]);
+			};
+			idx = idx+1;
+		});
+
+		if(complete == true) {
+			res = res.asArray;
+		} {
+			res = [];
+		};
+
+		^[res, idx];
+	}
+
 }
 
 
