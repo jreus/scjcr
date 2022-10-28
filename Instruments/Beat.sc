@@ -56,6 +56,7 @@ Beat : SymbolProxyManager {
 		};
 	}
 
+	// TODO!!!! gui editor of all sequences...
 	gui {}
 
 
@@ -99,7 +100,7 @@ Beat : SymbolProxyManager {
 
 	// Destroy a sequencer if it exists
 	// Destroy all sequences if name is nil
-	xx {|name=nil|
+	ciao {|name=nil|
 		if(name.notNil) {
 			var seq = playersByName.at(name);
 			if(seq.notNil) {
@@ -151,6 +152,7 @@ Beat : SymbolProxyManager {
 
 
 	//********** Create / reference a LIVE SEQUENCER ************//
+	// TODO: This probably is suffering from coderot!
 	// in : the input bus to record from
 	// must be followed with a call to .rec or .recStart
 	live {|name, pattern, zeroDegree, sdurscale, outbus, start, dur, rate, pan, autoplay=true, stepd=nil, in=0, timeout=30|
@@ -233,6 +235,7 @@ Beat : SymbolProxyManager {
 
 
 	//********** Create / reference a SYNTH SEQUENCER ************//
+
 	syn {|name, instrumentName, pattern, rootPitch, durScale, outbus, pan, scale, autoplay=true|
 		var seq;
 		instrumentName = instrumentName.asSymbol;
@@ -328,9 +331,6 @@ EventSequence {
 		trackFX = Synth(\trackInsert_2ch, [\bus, trackBus, \amp, trackAmp, \dest, outbus], synthgroup, \addToTail);
 	}
 
-
-
-
 	//************ PUBLIC API ***************//
 
 	// stop any playback and free up resources for this sequencer...
@@ -347,10 +347,6 @@ EventSequence {
 			parentBeat.unregister(this);
 		}
 	}
-
-
-
-
 
 	//****************************************
 	// Track Insert Controls... these only modify the track insert synth
@@ -376,13 +372,14 @@ EventSequence {
 
 	// Set output bus for this sequencer's track insert...
 	out {|outbus|
+
 		if(outbus.notNil) {
 
 			if(outbus.isKindOf(Number).not.and { outbus.isKindOf(Bus).not }) {
 				{
 					outbus = outbus.bus;
 				}.try({
-					"Invalid output bus '%'".format(outbus).throw;
+					"EventSequence.out. Invalid output bus '%'".format(outbus).throw;
 				});
 			};
 
@@ -390,7 +387,7 @@ EventSequence {
 			trackFX.set(\dest, outBus);
 
 			if(Beat.verbose) {
-				"Set % track destination to '%'".format(id, outBus).warn;
+				"EventSequence.out. Set % track destination to '%'".format(id, outBus).warn;
 			};
 
 		}
@@ -398,15 +395,11 @@ EventSequence {
 	}
 
 
-
-
-
 	//*********************************
 	// Pattern / Pbind Controls...
 	//   NOTE: Many of these do not rebuild the pattern
 	//         which you will have to do manually
 	//*********************************
-
 	pan {|pan|
 		if(pan.notNil) {
 			eventPanning = pan;
@@ -434,7 +427,6 @@ EventSequence {
 
 	// MELODY PARAMETERS
 	// see the event pitch model: https://depts.washington.edu/dxscdoc/Help/Tutorials/Streams-Patterns-Events5.html
-
 
 	// musical scale : a scale (Scale)
 	scale {|ascale|
@@ -530,8 +522,6 @@ EventSequence {
 			"Cannot set gtrans on % - build Pdef first!".format(this.id).throw;
 		};
 	}
-
-
 
 	// Start and stop the Pdef
 	play {|clock, quant|
@@ -770,9 +760,7 @@ SampleSequence : EventSequence {
 
 				res;
 			};
-
 		};
-
 
 		// Pattern Builder / PBind
 		pb = Dictionary.new;
@@ -826,16 +814,23 @@ SampleSequence : EventSequence {
 	//*************************** MUTATORS ***********************//
 
 	// Set sample id, start point and duration in seconds
-	// TODO: can this be set on a running pbindef
+	// TODO: can this be set on a running pbindef?
+	// sid can also be a tuple containing [sid, start_s, dur_s]
 	smpl {|sid, start_s, dur_s|
 		var smpl;
-
 		if(sid.notNil) {
+
+			if(sid.isKindOf(ArrayedCollection)) {
+				start_s = sid[1];
+				dur_s = sid[2];
+				sid = sid[0];
+			};
+
 			smpl = Smpl.at(sid);
 
 			if(smpl.isNil) {
 				// TODO: make this more graceful....
-				"Sample '%' could not be found".format(sid).throw;
+				"SampleSequence.smpl. Sample '%' could not be found".format(sid).throw;
 			};
 
 			if((sid != sampleName)) { // a new sample file is being used for the first time
@@ -843,7 +838,7 @@ SampleSequence : EventSequence {
 				if((smpl.class != LiveSample).and { Smpl.at(sampleName).class == LiveSample }) {
 					// We are switching from a livesample to a regular sample
 					if(Beat.verbose) {
-						"Converted seq '%' to fixed sample '%' from live '%'".format(id, sid, sampleName).warn;
+						"SampleSequence.smpl. Converted seq '%' to fixed sample '%' from live '%'".format(id, sid, sampleName).warn;
 					};
 					liveSampler = false;
 				};
@@ -852,12 +847,11 @@ SampleSequence : EventSequence {
 				sampleFileDuration = smpl.duration;
 				sampleFileFrames = smpl.numFrames;
 
-				"Changed sample to '%'".format(sampleName).post;
+				"SampleSequence.smpl. Changed sample to '%'".format(sampleName).post;
 			};
 
 			this.pr_setStartAndEndFrames(start_s, dur_s);
 		};
-
 	}
 
 	// Add a pattern
@@ -869,9 +863,6 @@ SampleSequence : EventSequence {
 	pat {|pattern|
 		this.pr_setPattern(pattern, \amp);
 	}
-
-
-
 
 
 	//((((((((((((((((((((((((LIVE SAMPLING)))))))))))))))))))))))//
@@ -970,7 +961,6 @@ SampleSequence : EventSequence {
 				},
 				{
 					"Invalid input source '%', must be bus number, fx unit or ndef.".format(in).error;
-
 				}
 			);
 
@@ -999,8 +989,7 @@ SampleSequence : EventSequence {
 			// parse positions into an array
 		};
 
-		if(positions.isKindOf(SequenceableCollection)) {
-			// array of positions...
+		if(positions.isKindOf(SequenceableCollection)) { // array of positions...
 		} {
 			// fixed value.. should be a number..
 			this.pr_setStartAndEndFrames(positions, dur);
@@ -1020,13 +1009,12 @@ SampleSequence : EventSequence {
 
 	*/
 
-
 	// set sample playback duration in seconds : a float
-	dur {|dur|
-		// recalculate end frame...
-
-	}
-
+	// TODO: UNIMPLEMENTED!!!
+	// dur {|dur|
+	// 	// recalculate end frame...
+	//
+	// }
 
 	// sample playback rate : a float
 	// Note: this does not rebuild the pattern
@@ -1036,8 +1024,6 @@ SampleSequence : EventSequence {
 		}
 		^this;
 	}
-
-
 
 	// TODO: this method doesn't work, it's old cruft
 	//b.get("gong1").setPitch("  1234 ---5 --6- 7-8-", Scale.major, \c2);
@@ -1110,7 +1096,6 @@ SynthSequence : EventSequence {
 
 		this.dur(durscale);
 		this.pan(pan);
-
 
 		this.pr_setPattern(pattern);
 	}
@@ -1281,9 +1266,6 @@ SynthSequence : EventSequence {
 		this.pr_setPattern(pattern, \PAT_SCALEDEGREE);
 	}
 
-
-
-
 }
 
 
@@ -1368,7 +1350,6 @@ SmplHelper {
 		};
 
 	}
-
 
 }
 

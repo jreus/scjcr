@@ -1,5 +1,3 @@
-
-
 JUtil { // Handy utility methods
 	classvar catchKeyWin;
 	classvar jfps;
@@ -12,10 +10,6 @@ JUtil { // Handy utility methods
 
 	*pwd {
 		^thisProcess.nowExecutingPath.dirname;
-	}
-
-	*audioSetup {
-		"open -a 'Audio MIDI Setup'".unixCmd;
 	}
 
 	*catchKeys {|callback|
@@ -66,6 +60,63 @@ JUtil { // Handy utility methods
 			treePlot.setTopLeftBounds(Rect(600, 0, 300, 850));
 		};
 	}
+
+
+	// Open a file chooser dialog. The callback function will receive the file path selected.
+	*chooseFile {|callback|
+		var filepath = nil;
+		FileDialog.new({ |paths|
+			filepath = paths[0];
+			postln("Selected path:" + filepath);
+			callback.value(filepath);
+		}, {
+			postln("Dialog was cancelled. Try again.");
+			callback.value(nil);
+		});
+	}
+
+	// Read a buffer and convert to mono if desired, using a specific mix mode.
+	// callback will receive the loaded Buffer object when it's ready.
+	// stereo to mono mix modes are: \right \left \mix
+	*loadBuf {|filepath, server, callback, mono=true, mixmode=\mix|
+		Buffer.read(server, filepath, action: {|buf|
+			postln("Reading Buf: " + buf);
+			if( (mono == true).and { buf.numChannels == 2 } ) {
+				var monobuf = Buffer.alloc(server, buf.numFrames, 1);
+				buf.normalize.loadToFloatArray(action: {|arr|
+					var monomix;
+					monomix = Array.newClear(arr.size / 2).collect {|it, idx|
+						switch(mixmode,
+							\right, { arr[idx*2] },
+							\left, { arr[idx*2 + 1] },
+							\mix, { arr[idx*2] + arr[idx*2 + 1] },
+							{ Error("Invalid mixdown option % when loading sample %".format(monomix, this)).throw; }
+						);
+					};
+					"Array collected and buf is %".format(monobuf).postln;
+					monobuf.loadCollection(monomix.normalize(-1,1), 0, { "Loaded mono buf".postln });
+					"Success!".postln;
+				});
+				callback.value(monobuf);
+			} {
+				callback.value(buf);
+			};
+		});
+	}
+
+	// Open a file chooser dialog to choose an audio file, which will be loaded into a buffer.
+	// The callback will receive the Buffer object once loaded.
+	*chooseBuf {|callback, mono=true, mixmode=\mix|
+		FileDialog.new({ |paths|
+			var filepath = paths[0];
+			postln("Selected path:" + filepath);
+			JUtil.loadBuf.value(filepath, callback, mono, mixmode);
+		}, {
+			postln("Dialog was cancelled. Try again.");
+			callback.value(nil);
+		});
+	}
+
 }
 
 // A frames per second counter
@@ -148,6 +199,96 @@ JLog {
 }
 
 
+/*
+A mechanism to load and cache buffers, freeing the oldest ones
+when new buffers are loaded in situations where buffers are loaded
+continuously and older ones need to be pruned to avoid hitting the
+limit on allocatable buffers.
+*/
+BufferLoaderQueue {
+	var <bufsQueue; // queue of loaded buffers
+	var <loadingTasks; // polling tasks that wait until buffers are loaded
+	var <maxBuffers; // maximum number of buffers before old ones start getting freed
+	var <loadingPollRate = 0.2;
+	var <activeServer;
+
+	*new {|server, size|
+		^super.new.init(server, size);
+	}
+
+	init {|server, size|
+		bufsQueue = List.new;
+		loadingTasks = List.new;
+		maxBuffers = size;
+		if(server.isNil) {
+			server = Server.default;
+		};
+		activeServer = server;
+	}
+
+	/*
+	Load a list of buffers
+	wavs  a list of pseudoobjects with a 'file' field containing filepath
+	done_callback  function called when buffers are loaded
+	*/
+	load_bufs {|wavs, done_callback|
+		var loadlist = List.new;
+		if(wavs.isKindOf(SequenceableCollection).not) {
+			wavs = [wavs];
+		};
+		wavs.do {|wav, idx|
+			wav.status = \loading;
+			loadlist.add(wav);
+			Buffer.read(activeServer, wav.file, action: {|bf|
+				var loadwav = wav;
+				loadwav.buf=bf;
+				loadwav.status=\ready;
+			});
+		};
+
+		// Run a thread that finishes when all buffers are loaded
+		// and then runs the callback function
+		loadingTasks.add({
+			var not_loaded = true;
+			var loading = loadlist;
+			while { loading.any {|wv| wv.status == \loading } } {
+				loadingPollRate.wait;
+			};
+
+			// we use a circular buffer to cache buffers and free them
+			// after a while so that we don't just create infinite buffers
+			loading.do {|wav, idx|
+				this.cache_buf(wav.buf);
+			};
+
+			// Finally, run callback and pass list of loaded buffers
+			done_callback.value(loading);
+		}.fork(AppClock));
+
+	}
+
+	// private function, adds a new buffer to the queue
+	// removes and frees the oldest buffer if maxBuffers is reached
+	cache_buf {|newbuf|
+		var oldbuf;
+		if(bufsQueue.size >= maxBuffers) {
+			oldbuf = bufsQueue.pop;
+		};
+		bufsQueue.addFirst(newbuf);
+		if(oldbuf.notNil) { oldbuf.free };
+		^oldbuf;
+	}
+
+
+	// Stop all loading tasks and free all buffers.
+	clear {
+		loadingTasks.do {|rtn| rtn.stop };
+		bufsQueue.do {|buf| buf.free };
+	}
+}
+
+
+
 // System for using symbols as language proxies for more complex objects.
 // Certain classes, called SymbolProxyManagers, can also keep internal dictionaries
 // of symbol>object and link them into the SymbolProxy system. This is useful, for example,
@@ -212,11 +353,10 @@ ERROR TYPES
 
 // Errors in custom microlanguages
 LangError : Error {
-
+	errorString {
+		^what;
+	}
 }
-
-
-
 
 
 

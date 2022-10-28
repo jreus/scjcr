@@ -133,6 +133,7 @@ FX : SymbolProxyManager {
 	var <masterproxy; // final mastering, limiting & volume stage before going to audio hardware
 
 	classvar <>verbose=true;
+	classvar <>enableLimiter=true;
 	classvar <singleton;
 
 	*initClass {
@@ -155,14 +156,14 @@ FX : SymbolProxyManager {
 	}
 
 	freeAll {
-		"Free All FX".warn;
+		"FX.freeAll. Free All FX".postln;
 		units.keys.do {|key| this.freeUnit(key) };
 	}
 
 
 	*getManager {
 		if(singleton.isNil) {
-			"FX Manager is not initialized, use FX.new(server, group) to create the singleton instance".error;
+			"FX.getManager. FX Manager is not initialized, use FX.new(server, group) to create the singleton instance".error;
 		};
 		^singleton;
 	}
@@ -181,20 +182,19 @@ FX : SymbolProxyManager {
 	}
 
 	init {|serv, group, outbus=0, onComplete=nil|
+		if(serv.isNil) {
+			serv = Server.default;
+		};
 		server = serv;
-
-		"FX: Setting Ndef.defaultServer to '%'".format(server).warn;
+		"FX. Setting Ndef.defaultServer to '%'".format(server).postln;
 		Ndef.defaultServer = server;
 
-		if (group.isNil) {
-			group = Group.new(server, \addAfter);
-		};
+		if (group.isNil) { group = Group.new(server, \addAfter) };
 
 		fxgroup = group;
-		"FX: Found fx group %".format(fxgroup).warn;
+		"FX. Found fx group %".format(fxgroup).postln;
 
 		this.loadSynthDefsEventTypes();
-
 
 		units = Dictionary.new;
 		cleanbus = Bus.audio(server, 2);
@@ -207,7 +207,7 @@ FX : SymbolProxyManager {
 		{
 			server.sync;
 			if(masterproxy.isNil) {
-				"FX: Creating master node".warn;
+				"FX.init. Creating master node".postln;
 
 				// mastersynth = Synth(\mixMaster, [
 				// 	\fxbus, fxbus,
@@ -216,19 +216,26 @@ FX : SymbolProxyManager {
 
 				masterproxy = NodeProxy.new(server, \audio, 2);
 				masterproxy.play(out: outbus, numChannels: 2, group: fxgroup, multi: false, addAction: \addToTail);
-				"FX: Setting masterproxy.source".postln;
+				"FX.init. Setting masterproxy.source".postln;
 				masterproxy.source = {|gain=1.0|
 					var mix, fxmix, clean;
 					clean = In.ar(cleanbus, 2);
 					fxmix = fxmixproxy.ar(2);
 					mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
+					if(enableLimiter) {
 					mix = Limiter.ar(LeakDC.ar(mix), 1.0, 0.001);
+					};
 					mix * gain;
 				};
 
+				server.sync;
+
+				masterproxy.asGroup.moveToHead(fxgroup);
+				fxmixproxy.asGroup.moveToHead(fxgroup);
+
 
 			};
-			"FX: Finished audiochain setup".warn;
+			"FX. Finished audiochain setup".postln;
 			if(onComplete.notNil) {
 				onComplete.value(this);
 			};
@@ -243,7 +250,9 @@ FX : SymbolProxyManager {
 			cleansig = In.ar(cleanbus, 2);
 			fxsig = In.ar(fxbus, 2);
 			mix = cleansig + fxsig;
-			mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
+			if(enableLimiter) {
+			//mix = LeakDC.ar(Limiter.ar(mix, 1.0, 0.001));
+			};
 			Out.ar(outbus, mix * gain);
 		}).add;
 	}
@@ -303,18 +312,13 @@ FX : SymbolProxyManager {
 		}
 	}
 
-
-
 	// Allocate the data structure for a new FX unit but do not compile the Ndef
 	allocUnit {|name, inChannels=2|
 		var unit;
-
 		if(name.class != Symbol) {
 			"FX Unit name must be a symbol, received %: '%'".format(name.class, name).throw;
 		};
-
 		unit = units.at(name);
-
 		if(unit.isNil) {
 			"NEW UNIT '%' '%'".format(name, inChannels).postln;
 			unit = FXUnit.new(name, this, inChannels, server);
@@ -338,7 +342,6 @@ FX : SymbolProxyManager {
 		^unit;
 	}
 
-
 	// Convenience method, combines allocUnit (when needed) and setUnit
 	unit {|name, inChannels=2, desc|
 		var theunit = units.at(name);
@@ -347,12 +350,6 @@ FX : SymbolProxyManager {
 		};
 		^this.setUnit(name, desc);
 	}
-
-
-
-
-
-
 
 }
 
@@ -819,10 +816,14 @@ FXUnit {
 
 
 		if(firstBuild == true) {
-
-			ndef = ndefbuilder.interpret;
-			parentFX.fxmixproxy.add(ndef, 0);
-			ndef.fadeTime = fadeTime;
+			{
+				ndef = ndefbuilder.interpret;
+				parentFX.server.sync;
+				ndef.asGroup.moveToHead(parentFX.fxgroup);
+				parentFX.server.sync;
+				parentFX.fxmixproxy.add(ndef, 0);
+				ndef.fadeTime = fadeTime;
+			}.fork(AppClock);
 		} {
 			ndef.fadeTime = fadeTime;
 			ndef = ndefbuilder.interpret;

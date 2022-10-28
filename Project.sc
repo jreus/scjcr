@@ -31,11 +31,13 @@ Project {
 	classvar <>defaultSynthPath;
 	classvar <>samplerates;
 	classvar <>blocksizes;
+
 	classvar <>devicepreference;
-	classvar <meters;
+	classvar <meters, <scenesWin;
 	classvar <audioChain;
 	classvar <reaperBridge;
-	classvar <>memSize, <>numBuffers;
+	classvar <>memSize, <>numBuffers, <>numOutputs, <>numInputs;
+
 	classvar <>limitSamplesLocal=1000, <>limitSamplesGlobal=1000;
 	classvar <garbage;
 	classvar <>resetAction;
@@ -47,16 +49,18 @@ Project {
 
 	// TODO: create a project preferences file to include this stuff...
 	*initClass {
-		samplerates = [22050, 44100, 48000, 88200, 96000];
-		blocksizes = [16,32,64,128,256,512,1024];
+		samplerates = [11025, 22050, 44100, 48000, 88200, 96000, 1920000];
+		blocksizes = [16,32,64,128,256,512,1024, 2048, 4096];
 		memSize = 2.pow(18);
 		numBuffers = 2.pow(10);
+		numOutputs = 2;
+		numInputs = 2;
 		garbage = List.new;
 		resetAction = {
 			"Project reset".warn;
 			MPK.initMidiFuncs;
 		};
-		defaultSynthPath = "~/Dev/_LIB/SC_Synthesis/SynthDefs".absolutePath;
+		defaultSynthPath = "~/Dev/SC_Libs/scjcr/SynthDefs/".absolutePath;
 	}
 
 	*meter {|server|
@@ -72,6 +76,16 @@ Project {
 			meters.window.front;
 		};
 		^meters;
+	}
+
+	*scenes {
+		if(scenesWin.isNil.or { scenesWin.isClosed }) {
+			scenesWin = Scenes.gui;
+			scenesWin.alwaysOnTop_(true).front;
+		} {
+			scenesWin.front;
+		};
+		^scenesWin;
 	}
 
 	// Use this every time a temporary process; synth, ndef, or pdef is created
@@ -105,7 +119,10 @@ Project {
 		this.resetAction.();
 	}
 
-	*startup {|server=nil, verbose=false, scenes=true, meters=true, macros=false, slimLocal, slimGlobal, mixer=false, reaper=false, synthPath=nil, rootPath=nil, localSamplePaths=nil, onBoot=nil|
+	// TODO: I think reaperbridge  and the audiochain might be rotten code at this point..
+	// TODO: Probably we want to integrate FX and Beat somehow?
+	// TODO: Is Macros also coderotten?
+	*boot {|server=nil, sampleRate=44100, blockSize=512, hardwareBufferSize=512, verbose=false, scenes=false, meters=false, macros=false, slimLocal, slimGlobal, mixer=false, reaper=false, synthPath=nil, rootPath=nil, localSamplePaths=nil, onBoot=nil|
 
 		if(slimLocal.notNil) {
 			this.limitSamplesLocal = slimLocal;
@@ -114,43 +131,50 @@ Project {
 			this.limitSamplesGlobal = slimGlobal;
 		};
 
+		/* TODO: Are these code-rotten?
 		if(mixer.notNil) { audioChain = mixer };
 		if(reaper.notNil) { reaperBridge = reaper };
+		*/
 
 		if(rootPath.isNil) { "`rootPath` must specify a valid project root directory in Project.startup".throw };
+
+		if(server.isNil) { server = Server.default };
+		server.options.sampleRate = sampleRate;
+		server.options.blockSize = blockSize;
+		server.options.hardwareBufferSize = hardwareBufferSize;
+		server.options.numOutputBusChannels = numOutputs;
+		server.options.numInputBusChannels = numInputs;
 
 		// Init non-server dependent modules
 		Scenes.init(rootPath, rootPath +/+ "_scenes/");
 		Macros.load(rootPath +/+ "_macros/");
 		if(macros == true) { Macros.preprocessor = true };
-		if(scenes) { Scenes.gui };
 		if(localSamplePaths.isNil) { // use default project structure local samples directory
 			localSamplePaths = [rootPath +/+ "_samples/"];
 			if(File.exists(localSamplePaths[0]).not) { File.mkdir(localSamplePaths[0]) };
 		};
-		Project.pr_makeStartupWindow(server, localSamplePaths, synthPath, onBoot, meters, verbose);
+		Project.pr_makeStartupWindow(server, localSamplePaths, synthPath, onBoot, meters, scenes, verbose);
 	}
 
 
-	*pr_makeStartupWindow {|server, localSamplePaths, synthPath, onBoot, showMeters, verbose|
+	*pr_makeStartupWindow {|server, localSamplePaths, synthPath, onBoot, showMeters, showScenes, verbose|
 		var win, styler, container, subview;
 		var srdropdown, bsdropdown, devlist, yesbut, nobut;
-		var audiochain, reaperbridge, allsamples;
+		var showscenesBut, showmetersBut, allsamples;
 
 		if(synthPath.isNil) {
 			synthPath = defaultSynthPath;
 		};
 
-
-		if(server.isNil) { server = Server.default };
 		win = Window.new("Choose Audio Device", Rect(Window.screenBounds.width / 2.5, Window.screenBounds.height / 2.4,300,200), false);
 		styler = GUIStyler(win);
 		container = styler.getView("Start", win.view.bounds, margin: 10@10, gap: 10@30);
 		styler.getSizableText(container, "samplerate", 55, \right);
-		srdropdown = PopUpMenu(container, 70@20).items_(samplerates).value_(1);
+		srdropdown = PopUpMenu(container, 70@20).items_(samplerates).value_(samplerates.indexOf(server.options.sampleRate));
 
 		styler.getSizableText(container, "blocksize", 60, \right);
-		bsdropdown = PopUpMenu(container, 60@20).items_(blocksizes).value_(4);
+		bsdropdown = PopUpMenu(container, 60@20).items_(blocksizes).value_(blocksizes.indexOf(server.options.blockSize));
+
 		styler.getSizableText(container, "device", 55, \right, 14);
 		devlist = PopUpMenu.new(container, Rect(0, 0, 210, 30)).font_(Font("Arial", 16));
 		Platform.case(
@@ -161,10 +185,14 @@ Project {
 		\osx, {
 				"Loading audio device options for OSX".warn;
 				devlist.items_(ServerOptions.devices.sort);
-			}, {
-				Error("Unknown device configuration for OS").throw;
+			},
+		\windows, {
+				"Loading audio device options for Windows".warn;
+				devlist.items_(ServerOptions.devices.sort);
 			},
 		);
+
+		/* TODO: I don't think these buttons actually do anything meaningful anymore....
 
 		subview = styler.getView("AudioChain", 50@70, false, 0@0, 0@0, container);
 		audiochain = RadioButton(subview, 50@50, \box);
@@ -176,6 +204,22 @@ Project {
 		reaperbridge.value = reaperBridge;
 		styler.getSizableText(subview, "Reaper Bridge", 50, \center);
 
+		*/
+
+
+		// Show Scenes
+		subview = styler.getView("ShowScenes", 50@70, false, 0@0, 0@0, container);
+		showscenesBut = RadioButton(subview, 50@50, \box);
+		showscenesBut.value = showScenes;
+		styler.getSizableText(subview, "Show Scenes", 50, \center);
+
+		// Show Meters
+		subview = styler.getView("ShowMeters", 50@70, false, 0@0, 0@0, container);
+		showmetersBut = RadioButton(subview, 50@50, \box);
+		showmetersBut.value = showMeters;
+		styler.getSizableText(subview, "Show Meters", 50, \center);
+
+		// Load Samples Limits
 		subview = styler.getView("Load all Samples", 50@70, false, 0@0, 0@0, container);
 		allsamples = RadioButton(subview, 50@50, \box);
 		styler.getSizableText(subview, "Load All Samples?", 50, \center);
@@ -190,8 +234,8 @@ Project {
 				// OSX / WINDOWS
 				server.options.device = devlist.items[devlist.value];
 			});
-			server.options.numInputBusChannels = 20;
-			server.options.numOutputBusChannels = 20;
+			server.options.numInputBusChannels = numInputs;
+			server.options.numOutputBusChannels = numOutputs;
 			server.options.memSize = memSize;
 			server.options.blockSize = bsdropdown.item.asInteger;
 			server.options.sampleRate = srdropdown.item.asInteger;
@@ -203,24 +247,39 @@ Project {
 				devlist.items[devlist.value]
 			).warn;
 			server.waitForBoot { // load server-dependent modules
-				// SYNTH LIBRARY
+
+				// Load Synthdefs...
 				"LOADING SYNTH LIBRARY AT %".format(synthPath).warn;
 				Syn.load(synthPath);
 				if(allsamples.value == true) {
 					this.limitSamplesGlobal = 50000;
 					this.limitSamplesLocal = 50000;
 				};
-				// SAMPLE LIBRARY
+
+				// Show scenes & meters
+				if(showmetersBut.value) { this.meter };
+				if(showscenesBut.value) { this.scenes };
+
+				// Load Samples ...
 				Smpl.load(server, verbose: verbose, limitLocal: this.limitSamplesLocal, limitGlobal: this.limitSamplesGlobal, localSamplePaths: localSamplePaths, doneFunc: {
-					if(showMeters) { this.meter };
+
+					/*
+					TODO: I think these two lines might be rotten code...
 					if(audiochain.value) { this.initAudioChain(server) };
 					if(reaperbridge.value) { Rea.init };
+					*/
+
+
+
 					if(onBoot.notNil) { onBoot.value };
 				});
 			};
 		});
 		nobut.action_({|btn| win.close});
 		win.alwaysOnTop_(true).front;
+		win.view.keyDownAction = { |doc, char, mod, unicode, keycode, key|
+			if(unicode == 13) { yesbut.doAction() };
+		};
 	}
 
 	*initAudioChain {|serv|

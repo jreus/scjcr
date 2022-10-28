@@ -200,10 +200,3 @@ WordWeaving : TextView {
 	// END key event overrides
 	// ---------------------------------------------------------------------------------
 }
-
-// ERROR TYPES ...
-LangError : Error {
-	errorString {
-		^what;
-	}
-}
