@@ -47,6 +47,8 @@ RAVEModelManager {
 	Parse a modelspec Dictionary that contains information about RAVE torchscript models
 
 	rootpath <str> root path to RAVE models
+	modelspec <Dictionary> dictionary of model id->modelspec
+	jsonfile <filepath> alternatively 'root' and 'models' can be specified in a json file
 
 	Each modelspec entry must have the following parameters:
 	  path  <str> path to model file, minus the rootpath
@@ -54,10 +56,25 @@ RAVEModelManager {
 	  gate  <bool> add a noisegate or not
 	  gateThresh <float> volume thresh for the gate to kick in
 	*/
-	parseModels {|rootpath, modelspec|
+	parseModels {|rootpath, modelspec, jsonfile|
 		var modelerror = false;
-		modelsRoot = rootpath;
-		models = modelspec;
+
+		if(jsonfile.notNil) { // Parse JSON
+			var json = jsonfile.parseJSONFile;
+			modelsRoot = json["root"];
+			models = Dictionary.new;
+			json["models"].keysValuesDo {|id, modelspec|
+				models[id.asSymbol] = (
+					path: modelspec["path"],
+					numLatents: modelspec["numLatents"],
+					gate: modelspec["gate"],
+					gateThresh: modelspec["gateThresh"]
+				);
+			};
+		} { // Use input arguments
+			modelsRoot = rootpath;
+			models = modelspec;
+		};
 
 		"RAVEModelManager. ...scanning RAVE models...".postln;
 		models.keysValuesDo {|id, path|

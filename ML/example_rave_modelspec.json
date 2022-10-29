@@ -1,0 +1,17 @@
+{
+  "root": "/home/usr/path/to/models/",
+  "models": {
+    "darbouka": {
+      "path": "darbouka/darbouka.ts"
+      "numLatents": 4,
+      "gate": false,
+      "gateThresh": 0.1
+    },
+  	"nasa": {
+      "path": "nasa/nasa.ts",
+      "numLatents": 8,
+      "gate": true,
+      "gateThresh": 0.3
+    }
+  }
+}
