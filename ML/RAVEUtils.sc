@@ -15,6 +15,7 @@ RAVEModelManager {
 	var <targetModel = nil; // currently selected RAVE synth, all control operations target this synth
 	var <>mscale = 1.0; // scaling factor for latent biases, values >1.0 start to saturate
 	var <availableModels; // all available RAVE models
+	var <mixer;
 
 	var <>modelsRoot;
 	var <models;
@@ -44,6 +45,43 @@ RAVEModelManager {
 	}
 
 	/*
+	Creates a mixer ndef for creating a mix between rave inputs and outputs
+	the mixer can then be inserted somewhere, for example, in an fx chain, in the doneCallback function..
+
+	It can then be controlled either using a gui or commands...
+	r.mixer.gui // via gui
+	r.mixer.set(\i0pan, 0.0, \i0gain, 0.0, \o0pan, 0.0, \o0gain, 2.0) // via commands
+
+	*/
+	createMixer {|doneCallback|
+		// the mixer will have a number of iXpan, iXgain, oXpan and oXgain parameters for controlling the mixer
+		{
+			mixer = Ndef(\raveModelMixer, {
+				var raveins, raveouts, mix;
+				raveins = ins.collect {|inbus, idx|
+					Pan2.ar(In.ar(inbus, 2).sum, "i%pan".format(idx).asSymbol.kr(0.0), "i%gain".format(idx).asSymbol.kr(1.0))
+				};
+
+				raveouts = outs.collect {|outbus, idx|
+					Pan2.ar(In.ar(outbus, 2).sum, "o%pan".format(idx).asSymbol.kr(0.0), "o%gain".format(idx).asSymbol.kr(1.0))
+				};
+
+				mix = Mix(raveins) + Mix(raveouts);
+				mix;
+			});
+
+			server.sync;
+			mixer.asGroup.moveAfter(targetGroup);
+
+			if(doneCallback.notNil) {
+				doneCallback.value(mixer);
+			}
+
+		}.fork(AppClock);
+	}
+
+
+	/*
 	Parse a modelspec Dictionary that contains information about RAVE torchscript models
 
 	rootpath <str> root path to RAVE models
@@ -66,9 +104,9 @@ RAVEModelManager {
 			json["models"].keysValuesDo {|id, modelspec|
 				models[id.asSymbol] = (
 					path: modelspec["path"],
-					numLatents: modelspec["numLatents"],
-					gate: modelspec["gate"],
-					gateThresh: modelspec["gateThresh"]
+					numLatents: modelspec["numLatents"].asInteger,
+					gate: modelspec["gate"].interpret,
+					gateThresh: modelspec["gateThresh"].asFloat
 				);
 			};
 		} { // Use input arguments
@@ -99,6 +137,7 @@ RAVEModelManager {
 			model[\makeSynth] = {|inbus, outbus, targetGroup, addAction|
 				"Create RAVE % with % % % %".format(id, inbus, outbus, targetGroup, addAction).postln;
 				model[\synth].free; // free preexisting synth
+				//"Making RAVE for model %".format(model).postln;
 				model[\synth] = {|encoder=1.0, gain=1.0| // create RAVE synth..
 					var insig, outsig, z;
 					var zscale = model[\numLatents].collect{ |i| ("ls"++i).asSymbol.kr(1.0) };
@@ -112,6 +151,7 @@ RAVEModelManager {
 					};
 					outsig * gain;
 				}.play(target: targetGroup, outbus: outbus, addAction: addAction);
+				//"Made RAVE".postln;
 				model[\synth];
 			};
 		};

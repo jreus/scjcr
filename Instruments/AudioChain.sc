@@ -53,9 +53,9 @@ AudioChainManager {
 			"AudioChainManager. Server is not running, boot the server first!".throw;
 		};
 
-		inputsgroup = Group.new(server, \addBefore);
-		synthgroup = Group.new(server, \addAfter);
 		fxmanager = FX.new(server);
+		inputsgroup = Group.new(server, \addBefore);
+		synthgroup = Group.new(server, \addToHead);
 	}
 
 	// Convenience method to create / modify a FX unit
@@ -90,7 +90,6 @@ AudioChainManager {
 	}
 
 }
-
 
 
 /* FX MANAGER */
