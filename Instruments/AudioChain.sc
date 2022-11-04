@@ -1,10 +1,19 @@
 /*
 FX Units Livecoda
 (c) 2021 Jonathan Reus
+
+Updates:
+Nov 2022 ~ refactoring FX system into a more general AudioChainManager for managing server groups and signal chains.
+
 */
 
 /*
+
+
 @usage
+a = AudioChainManager.new(s);
+
+
 f = FX.new(s, Group.new(s, \addAfter));
 f.unit(\fx2, 2, "rev(vs100 lo0.2 mi0.5 hi0.1 mx0.7)");
 f.unit(\fx1, 2, "del() ws() rev()");
@@ -24,101 +33,63 @@ ws(p10 v1 mx0.99) rev(er0.8 mx0.9) ws(t2 p5 v1 mx0.9) lpf(co1200)
 
 */
 
-FXHelp {
 
-	// Microlang help string
-	*help {
-		"
-ws: waveshaping distortion
-ty=type (1:tanh, 2:softclip)
-pr=pre amplification (float)
-pv=pre amplification variation (float)
-vt=preamp modulation type (1:LFNoise2 2:SinOsc)
-vr=preamp modulation rate (float)
-mx=wet/dry mix (0-1)
+AudioChainManager {
+	var <fxmanager;
+	var <server;
+	var <synthgroup, <inputsgroup;
 
-lpf: filter
-co=cutoff hz (float)
-cv=cutoff variation hz (float)
-rq=reciprocal of q (float)
-vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-vr=cutoff modulator rate hz (float)
+	*new {|serv|
+		^super.new.init(serv);
+	}
 
-hpf: filter
-co=cutoff hz (float)
-cv=cutoff variation hz (float)
-rq=reciprocal of q (float)
-vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
-vr=cutoff modulator rate hz (float)
+	init {|serv, onComplete=nil|
+		if(serv.isNil) {
+			serv = Server.default;
+		};
+		server = serv;
 
-gn:  gain stage
-db=gain boost/cut in db (float: -60 - 60)
+		if(server.serverRunning.not) {
+			"AudioChainManager. Server is not running, boot the server first!".throw;
+		};
 
-pan: mix to mono and pan
-ps=pan position (float: 0-1) 0.5 is center
-db=gain boost/cut in db (float: -60 - 60)
+		inputsgroup = Group.new(server, \addBefore);
+		synthgroup = Group.new(server, \addAfter);
+		fxmanager = FX.new(server);
+	}
 
-in: mono signal mic input (SoundIn)
-bs=index of audio input bus (int)
-pr=pre amplification (float)
-pn=signal panning (float)
+	// Convenience method to create / modify a FX unit
+	// if desc is nil, just returns the fx unit
+	fx {|name, inChannels=2, desc|
+		^this.fxmanager.unit(name, inChannels, desc);
+	}
 
-xin: arbitrary bus input (In)
-bs=bus number (int)
-ch=channels (int)
-pr=pre amplification (float)
-pn=signal panning (float) - mixes multichannel down to mono
+	// Convenience method to clear one or all FX units
+	// if name is nil, clears all
+	clearFX {|name|
+		if(name.isNil) {
+			this.fxmanager.freeAll;
+		} {
+			this.fxmanager.freeUnit(name);
+		};
+	}
 
-out: signal output, number of channels matches whatever signal is at that point in the chain
-bs=ouput bus number (int)
-pr=pre amplification (float)
+	// Usually you don't want to mess with the master outBus and gain
+	//   but sometimes you might want to, for example, sending the signal to an
+	//   external app via a virtual audio bus
+	master {|outbus=0, gain=1.0|
+		this.fxmanager.master(outbus, gain);
+	}
 
-del: delay
-dt=delay time in seconds (float)
-dy=decay time in seconds (float)
-mx=dry/wet mix (float)
 
-eq3: 3 band eq
-lf=low frequency
-mf=mid frequency
-hf=high frequency
-lo=boost/cut in db
-mi=boost/cut in db
-hi=boost/cut in db
-lq=recip q low
-mq=recip q mid
-hq=recip q high
-
-eq: single band eq
-cf=center frequency
-db=cut/boost in db
-rq=reciprocal of q
-
-rev: reverb JPverb
-vt=reverb time in seconds, does not effect early reflections
-dm=hf damping as verb decays (0-1.0) - 0 is no damping
-vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
-er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
-lo=reverb time multiplier in low frequencies (0-1.0)
-mi=reverb time multiplier in mid frequencies (0-1.0)
-hi=reverb time multiplier in hi frequencies (0-1.0)
-mx=wet/dry mix (0-1)
-
-cmp: compressor (Compander)
-th=amplitude threshhold for compression to kick in (0.0-1.0)
-ra=compression ratio (0.0-1.0) - 1.0 is no compression, 0.333 is a ratio of 1/3
-at=attack in seconds
-re=release in seconds
-s_=side chain signal, either a fx unit name or ndef name
-sb=side chain signal bus
-sl=side chain level (0.0-1.0)
-mx=wet/dry mix (0.0-1.0)
-
-".postln;
+	// Wrapper around a UGEN graph, similar to {}.play but places this
+	// item into the AudioChain at a reasonable place.
+	// ugens is a ugen graph function that would otherwise be used to create an anonymouse synth with {}.play
+	play {|ugens, outbus=0, fadeTime=0.02, addaction=\addToTail|
+		ugens.play(outbus: outbus, fadeTime: fadeTime, target: synthgroup, addAction: addaction);
 	}
 
 }
-
 
 
 
@@ -126,10 +97,15 @@ mx=wet/dry mix (0.0-1.0)
 FX : SymbolProxyManager {
 	var <server;
 	var <fxgroup; // should be at the end of the server's group structure
-	var <units;
+
+	var <units; // All FX units
+
 	var <cleanbus; // send clean signals here
+
 	var <fxbus; // used internally to send from fxmixproxy to masterSynth
+
 	var <fxmixproxy; // mixpoint of different FX busses
+
 	var <masterproxy; // final mastering, limiting & volume stage before going to audio hardware
 
 	classvar <>verbose=true;
@@ -286,10 +262,6 @@ FX : SymbolProxyManager {
 		}
 	}
 
-	// convenience alias for freeUnit
-	xx {|name|
-		this.freeUnit(name);
-	}
 
 	// Unregister a FXUnit from being managed by this FX manager
 	unregister {|fxunit|
@@ -343,12 +315,17 @@ FX : SymbolProxyManager {
 	}
 
 	// Convenience method, combines allocUnit (when needed) and setUnit
+	// if desc is nil can also be used as an alternative to at()
 	unit {|name, inChannels=2, desc|
 		var theunit = units.at(name);
 		if(theunit.isNil) {
 			this.allocUnit(name, inChannels);
 		};
-		^this.setUnit(name, desc);
+		if(desc.isNil) {
+			^this.at(name);
+		} {
+			^this.setUnit(name, desc);
+		}
 	}
 
 }
@@ -943,6 +920,98 @@ FXUnit {
 	bus {
 		^inBus;
 	}
+
+	// FX Unit Help String, documentation of all the FX units.
+	*listUnits {
+		"
+ws: waveshaping distortion
+ty=type (1:tanh, 2:softclip)
+pr=pre amplification (float)
+pv=pre amplification variation (float)
+vt=preamp modulation type (1:LFNoise2 2:SinOsc)
+vr=preamp modulation rate (float)
+mx=wet/dry mix (0-1)
+
+lpf: filter
+co=cutoff hz (float)
+cv=cutoff variation hz (float)
+rq=reciprocal of q (float)
+vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+vr=cutoff modulator rate hz (float)
+
+hpf: filter
+co=cutoff hz (float)
+cv=cutoff variation hz (float)
+rq=reciprocal of q (float)
+vt=cutoff modulator type (1: LFNoise2, 2: SinOsc)
+vr=cutoff modulator rate hz (float)
+
+gn:  gain stage
+db=gain boost/cut in db (float: -60 - 60)
+
+pan: mix to mono and pan
+ps=pan position (float: 0-1) 0.5 is center
+db=gain boost/cut in db (float: -60 - 60)
+
+in: mono signal mic input (SoundIn)
+bs=index of audio input bus (int)
+pr=pre amplification (float)
+pn=signal panning (float)
+
+xin: arbitrary bus input (In)
+bs=bus number (int)
+ch=channels (int)
+pr=pre amplification (float)
+pn=signal panning (float) - mixes multichannel down to mono
+
+out: signal output, number of channels matches whatever signal is at that point in the chain
+bs=ouput bus number (int)
+pr=pre amplification (float)
+
+del: delay
+dt=delay time in seconds (float)
+dy=decay time in seconds (float)
+mx=dry/wet mix (float)
+
+eq3: 3 band eq
+lf=low frequency
+mf=mid frequency
+hf=high frequency
+lo=boost/cut in db
+mi=boost/cut in db
+hi=boost/cut in db
+lq=recip q low
+mq=recip q mid
+hq=recip q high
+
+eq: single band eq
+cf=center frequency
+db=cut/boost in db
+rq=reciprocal of q
+
+rev: reverb JPverb
+vt=reverb time in seconds, does not effect early reflections
+dm=hf damping as verb decays (0-1.0) - 0 is no damping
+vs=reverb size, scales size of delay lines (0.5 - 5) - values below 1 sound metallic
+er=early reflection shape (0-1.0) 0.707 = smooth exp decay / lower value = slower buildup
+lo=reverb time multiplier in low frequencies (0-1.0)
+mi=reverb time multiplier in mid frequencies (0-1.0)
+hi=reverb time multiplier in hi frequencies (0-1.0)
+mx=wet/dry mix (0-1)
+
+cmp: compressor (Compander)
+th=amplitude threshhold for compression to kick in (0.0-1.0)
+ra=compression ratio (0.0-1.0) - 1.0 is no compression, 0.333 is a ratio of 1/3
+at=attack in seconds
+re=release in seconds
+s_=side chain signal, either a fx unit name or ndef name
+sb=side chain signal bus
+sl=side chain level (0.0-1.0)
+mx=wet/dry mix (0.0-1.0)
+
+".postln;
+	}
+
 
 }
 
