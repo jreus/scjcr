@@ -38,7 +38,7 @@ Project {
 	classvar <reaperBridge;
 	classvar <>memSize, <>numBuffers, <>numOutputs, <>numInputs;
 
-	classvar <>limitSamplesLocal=1000, <>limitSamplesGlobal=1000;
+	classvar <>limitSamplesLocal=1000, <>limitSamplesGlobal=10000;
 	classvar <garbage;
 	classvar <>resetAction;
 
@@ -119,6 +119,46 @@ Project {
 		this.resetAction.();
 	}
 
+	/*
+	Initialize Project Workspace ( Syn, Smpl & Scenes for an already booted server )
+	TODO: Make this run automatically on server boot (there's probably a server callback that can be registered for this)
+	*/
+	*initWorkspace {|server, slimLocal=1000, slimGlobal=10000, synthPath=nil, localSamplePaths=nil, verbose=false, onComplete=nil|
+
+		if(slimLocal.notNil) {
+			this.limitSamplesLocal = slimLocal;
+		};
+		if(slimGlobal.notNil) {
+			this.limitSamplesGlobal = slimGlobal;
+		};
+
+		if(synthPath.isNil) {
+			synthPath = defaultSynthPath;
+		};
+
+		if(server.isNil) {
+			server = Server.default;
+		};
+
+		if(server.serverIsRunning) {
+		// Load Synthdefs...
+		"LOADING SYNTH LIBRARY AT %".format(synthPath).warn;
+		Syn.load(synthDefsPath: synthPath, server: server);
+
+		// Load Samples ...
+		Smpl.load(
+			server: server,
+			verbose: verbose,
+			limitLocal: this.limitSamplesLocal,
+			limitGlobal: this.limitSamplesGlobal,
+			localSamplePaths: localSamplePaths,
+			doneFunc: { if(onComplete.notNil) { onComplete.value }; }
+		); } {
+			"Cannot initialize workspace! Boot server first!".error;
+		};
+
+	}
+
 	// TODO: I think reaperbridge  and the audiochain might be rotten code at this point..
 	// TODO: Probably we want to integrate FX and Beat somehow?
 	// TODO: Is Macros also coderotten?
@@ -137,7 +177,6 @@ Project {
 		*/
 
 		if(rootPath.isNil) { "`rootPath` must specify a valid project root directory in Project.startup".throw };
-
 		if(server.isNil) { server = Server.default };
 		server.options.sampleRate = sampleRate;
 		server.options.blockSize = blockSize;
@@ -248,31 +287,17 @@ Project {
 			).warn;
 			server.waitForBoot { // load server-dependent modules
 
-				// Load Synthdefs...
-				"LOADING SYNTH LIBRARY AT %".format(synthPath).warn;
-				Syn.load(synthPath);
-				if(allsamples.value == true) {
-					this.limitSamplesGlobal = 50000;
-					this.limitSamplesLocal = 50000;
-				};
-
 				// Show scenes & meters
 				if(showmetersBut.value) { this.meter };
 				if(showscenesBut.value) { this.scenes };
 
-				// Load Samples ...
-				Smpl.load(server, verbose: verbose, limitLocal: this.limitSamplesLocal, limitGlobal: this.limitSamplesGlobal, localSamplePaths: localSamplePaths, doneFunc: {
-
-					/*
-					TODO: I think these two lines might be rotten code...
-					if(audiochain.value) { this.initAudioChain(server) };
-					if(reaperbridge.value) { Rea.init };
-					*/
-
-
-
-					if(onBoot.notNil) { onBoot.value };
-				});
+				this.initWorkspace(
+					server: server,
+					synthPath: synthPath,
+					localSamplePaths: localSamplePaths,
+					verbose: verbose,
+					onComplete: onBoot
+				);
 			};
 		});
 		nobut.action_({|btn| win.close});

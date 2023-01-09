@@ -308,6 +308,17 @@ Smpl {
 		"LOAD LIVESAMPLE CAPTURE SYNTHDEFS".warn;
 		LiveSample.loadSynthDefs(server);
 
+
+		if(limitLocal.isNil) {
+			"Smpl: limitLocal is nil! Using 1000".warn;
+			limitLocal=1000;
+		};
+
+		if(limitGlobal.isNil) {
+			"Smpl: limitGlobal is nil! Using 10000".warn;
+			limitGlobal=10000;
+		};
+
 		if(File.exists(globalSamplesPath).not) { File.mkdir(globalSamplesPath) };
 
 		if(localSamplePaths.notNil) { // Load sample directories
@@ -324,7 +335,7 @@ Smpl {
 		// Load samples from global directory
 		"\nSmpl: Loading Global Samples at %".format(globalSamplesPath).postln;
 		samplePath = PathName.new(globalSamplesPath);
-		loaded = this.pr_loadSamples(samplePath, lazyLoadGlobal, verbose, limitGlobal, "_glo");
+		loaded = this.pr_loadSamples(samplePath: samplePath, lazyLoad: lazyLoadGlobal, verbose: verbose, limit: limitGlobal);
 		"\nSmpl: % samples loaded".format(loaded).postln;
 
 		// Collect groups and tags
@@ -345,10 +356,13 @@ Smpl {
 	// private method
 	*pr_loadSamples {|samplePath, lazyLoad, verbose, limit|
 		var res, tmplim = limit;
+
 		res = block {|limitReached|
 			samplePath.filesDo {|path,i|
 				var res;
+
 				res = this.pr_loadSampleAtPathName(path, lazyLoad, verbose, samplePath);
+
 				if(res.notNil) {
 					if(verbose) {
 						"%[%: %]".format(res.name, path.folderName, path.fileName).postln;
@@ -375,12 +389,14 @@ Smpl {
 			var id, group, groupId, preStr = ".", tmp1;
 			var sampleSource = \UNKNOWN;
 
+
 			id = path.fileNameWithoutExtension.replace(" ","");
 			if(samples.at(id).notNil) {
 				if(samples.at(id).path != sf.path) { // if paths are not equal, modify id to avoid doubles
 					id = "%_%".format(sf.folderGroups.last.replace(" ","_"), id);
 				};
 			};
+
 
 			sf.name = id;
 			samples.put(id, sf);
@@ -395,6 +411,7 @@ Smpl {
 				localSamples.put(id, sf);
 			};
 
+
 			// Create group id from file path
 			tmp1 = path.allFolders.reverse;
 			sampleSourcePath.allFolders.do {|sourceFolderName|
@@ -406,6 +423,7 @@ Smpl {
 			tmp1.reverse.do {|folderName|
 				groupId = groupId++"--"++folderName;
 			};
+
 
 			groupId = groupId.asSymbol;
 			group = samplesByGroup.at(groupId);

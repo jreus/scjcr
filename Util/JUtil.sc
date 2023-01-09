@@ -200,6 +200,61 @@ JLog {
 
 
 /*
+Assert class that keeps a global track of the number of assert statements passed.
+Can be used in one of two ways:
+
+Assert("Some text"); // prints "ASSERT N: Some text"
+...where N is the running tally of assertions...
+
+or
+
+ASSERT( z == 2, "Bad z value!" ); // A boolean condition, where if the assertion fails an error is thrown.
+
+ASSERT(reset: true); // will reset the ASSERTION counter.
+
+*/
+ASSERT {
+
+	classvar singleton;
+	classvar <>num=0;
+
+	*new {|val="", text="", reset=false|
+		if(singleton.isNil) {
+			singleton = super.new;
+			^singleton.assert(val: val, text: text, reset: reset);
+		} {
+			^singleton.assert(val: val, text: text, reset: reset);
+		}
+	}
+
+	assert {|val="", text="", reset=false|
+		if(reset == true) {
+			num = 0;
+		};
+		if(val.isNil) {
+			val = "";
+		};
+
+		if(val.isBoolean) {
+			if(val.not) {
+				AssertionError("ASSERTION FAILED: %".format(text)).throw;
+			}
+		} {
+			text = "ASSERT %: % %".format(num, val, text);
+			text.postln;
+			num = num + 1;
+		};
+		^this;
+	}
+}
+
+AssertionError : Exception {
+	errorString {
+		^what;
+	}
+}
+
+/*
 A mechanism to load and cache buffers, freeing the oldest ones
 when new buffers are loaded in situations where buffers are loaded
 continuously and older ones need to be pruned to avoid hitting the
@@ -243,6 +298,7 @@ BufferLoaderQueue {
 				var loadwav = wav;
 				loadwav.buf=bf;
 				loadwav.status=\ready;
+				loadwav.duration = bf.duration;
 			});
 		};
 
@@ -377,6 +433,12 @@ Server.
 Color additions.
 Etc.
 ----------------------- */
++ Object {
+	isBoolean {
+		^[true.class, false.class, True.class, False.class].includes(this.class);
+	}
+}
+
 + Server {
 	*quickBoot {
 		var tmp = Server.internal;

@@ -576,7 +576,7 @@ SampleSequence : EventSequence {
 	var <samplePlayRate=1.0;
 	var <samplePanning=0.0;
 
-	// Pattern state
+	// Current amp pattern as string
 	var <ampPattern;
 
 	// start: in seconds / dur : in seconds
@@ -662,7 +662,11 @@ SampleSequence : EventSequence {
 		var parsedRaw, parsedByMeasure, pb, smpl;
 		var measureIdx=0, measureStepDelta;
 
+		ASSERT("Set pattern % to: %".format(type, pattern));
+
 		if(pattern.isNil) {
+			ASSERT("Pattern is nil!");
+
 			if(ampPattern.isNil) {
 				// set a default pattern if no prior pattern exists
 				if(sampleName.isNil) {
@@ -685,6 +689,9 @@ SampleSequence : EventSequence {
 		if(sampleName.notNil) {
 			smpl = Smpl.at(sampleName);
 		};
+
+		ASSERT("Before stripwhitespace Pattern is %".format(pattern));
+
 
 		parsedByMeasure = List.new;
 		pattern.stripWhiteSpace().do{|ch|
@@ -820,10 +827,14 @@ SampleSequence : EventSequence {
 		var smpl;
 		if(sid.notNil) {
 
-			if(sid.isKindOf(ArrayedCollection)) {
-				start_s = sid[1];
-				dur_s = sid[2];
-				sid = sid[0];
+			if(sid.isKindOf(String)) {
+				sid = sid;
+			} {
+				if(sid.isKindOf(ArrayedCollection)) {
+					start_s = sid[1];
+					dur_s = sid[2];
+					sid = sid[0];
+				};
 			};
 
 			smpl = Smpl.at(sid);

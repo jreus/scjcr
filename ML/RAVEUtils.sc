@@ -12,7 +12,8 @@ RAVEModelManager {
 	var <server;
 	var <ins, <outs; // input and output busses, used to pipe audio to and from the RAVE models
 	var <targetGroup; // group where RAVE synths will sit, ideally this should go after input UGens and before FX and master synths
-	var <targetModel = nil; // currently selected RAVE synth, all control operations target this synth
+	var <targetModel = nil; // currently selected model
+	var <targetModelSynth = nil; // currently selected RAVE synth, all control operations target this synth
 	var <>mscale = 1.0; // scaling factor for latent biases, values >1.0 start to saturate
 	var <availableModels; // all available RAVE models
 	var <mixer;
@@ -22,7 +23,7 @@ RAVEModelManager {
 
 
 	*new {|serv, target|
-		^super.new.init(serv);
+		^super.new.init(serv, target);
 	}
 
 	init {|serv, target|
@@ -168,16 +169,78 @@ RAVEModelManager {
 		^this.getModelPath(id).fullPath
 	}
 
-	// Set name,value pairs on the currently selected RAVE synth
+	// Set bias values on current model..
+	// if latents=nil then zero all biases for current model..
+	bias {|latents|
+		if(targetModel.notNil) {
+			var synthargs, idx;
+			if(latents.isNil) {
+				latents = 0.0.dup(targetModel['numLatents']); // all latents
+			};
+			synthargs = Array.newClear(latents.size * 2);
+			idx=0;
+			latents.do {|lat, latnum|
+				synthargs[idx] = ("lb"++latnum).asSymbol;
+				synthargs[idx+1] = lat;
+				idx = idx+2;
+			};
+
+			this.setParam(*synthargs);
+		};
+	}
+
+	// Set scale values on current model..
+	// if latents=nil then all biases for current model get set to unity
+	scale {|latents|
+		if(targetModel.notNil) {
+			var synthargs, idx;
+			if(latents.isNil) {
+				latents = 0.0.dup(targetModel['numLatents']); // all latents
+			};
+			synthargs = Array.newClear(latents.size * 2);
+			idx=0;
+			latents.do {|lat, latnum|
+				synthargs[idx] = ("ls"++latnum).asSymbol;
+				synthargs[idx+1] = lat;
+				idx = idx+2;
+			};
+
+			this.setParam(*synthargs);
+		};
+	}
+
+
+	// Set arbitrary name,value pairs on the currently selected RAVE synth
 	setParam {|... args|
-		postln("Set ((%)) on %".format(args, targetModel));
-		targetModel.set(*args);
-		^targetModel;
+		postln("Set ((%)) on %".format(args, targetModelSynth));
+		targetModelSynth.set(*args);
+		^targetModelSynth;
 	}
 
 	listModels {
 		models.keys.postln;
 		^models.keys;
+	}
+
+	/*
+	Print detailed list of model specs
+	*/
+	dumpModels {|id|
+		if(id.isNil) {
+			models.keysValuesDo {|key, val|
+				"%: %".format(key, val).postln;
+			};
+		} {
+			"%: %".format(id, models[id]).postln;
+		}
+	}
+
+	currentModel {
+		if(targetModel.notNil) {
+			"%: %".format(targetModel['id'], targetModel).postln;
+		} {
+			"Cannot get current model, select a model first using selectModel!".error;
+		}
 	}
 
 	/*
@@ -193,10 +256,12 @@ RAVEModelManager {
 		if(outbus.isNil) { outbus = outs[0] };
 		if(model.notNil) {
 			"Selecting Model: %".format(id).postln;
-			targetModel.free; // TODO: Maybe I don't want to do this? Should I allow multiple RAVE synths simultaneously?
+			model['id'] = id;
+			targetModel = model;
+			targetModelSynth.free; // TODO: Maybe I don't want to do this? Should I allow multiple RAVE synths simultaneously?
 			if(target.isNil) { target = targetGroup };
 			model[\makeSynth].value(inbus, outbus, target, \addToTail);
-			targetModel = model[\synth];
+			targetModelSynth = model[\synth];
 		} {
 			"Unknown model '%'".format(id).warn;
 		};
@@ -205,7 +270,7 @@ RAVEModelManager {
 	// Clear all RAVE synths and clean up resources...
 	clearAll {
 		// For now it's just freeing the target synth..
-		targetModel.free;
+		targetModelSynth.free;
 	}
 
 }

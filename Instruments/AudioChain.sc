@@ -39,11 +39,11 @@ AudioChainManager {
 	var <server;
 	var <synthgroup, <inputsgroup;
 
-	*new {|serv|
-		^super.new.init(serv);
+	*new {|serv, onComplete|
+		^super.new.init(serv, onComplete);
 	}
 
-	init {|serv, onComplete=nil|
+	init {|serv, onComplete|
 		if(serv.isNil) {
 			serv = Server.default;
 		};
@@ -53,9 +53,18 @@ AudioChainManager {
 			"AudioChainManager. Server is not running, boot the server first!".throw;
 		};
 
-		fxmanager = FX.new(server);
-		inputsgroup = Group.new(server, \addBefore);
-		synthgroup = Group.new(server, \addToHead);
+		"Starting AudioChainManager using: %".format(server);
+
+
+		fxmanager = FX.new(server, onComplete: {|fx|
+			inputsgroup = Group.new(server, \addBefore);
+			synthgroup = Group.new(server, \addToHead);
+			"AudioChain. Created inputsgroup: %  synthgroup: %".format(inputsgroup, synthgroup).postln;
+			server.sync;
+			if(onComplete.notNil) {
+				onComplete.value(this);
+			};
+		});
 	}
 
 	// Convenience method to create / modify a FX unit
@@ -273,6 +282,13 @@ FX : SymbolProxyManager {
 
 	}
 
+	// print all active fx units and their fx stages...
+	dumpUnits {
+		units.keysValuesDo {|id, unit|
+			"%: '%'".format(id, unit.fxStagesDesc).postln;
+		};
+	}
+
 	// Register a FX Unit to be managed by this FX manager
 	register {|fxunit|
 		if(units.at(fxunit.id).isNil) {
@@ -361,10 +377,17 @@ FXUnit {
 	var <ndef;
 	var <>fadeTime = 0.02;
 	var <fxStagesChain;  // List : stages in order of signal flow
+	var <fxStagesDesc;  // String : plaintext stages as described by client..
 	var <fxStagesByType; // Dictionary : stages indexed by type
 
 	classvar <stageDescs;
 	classvar <stageRegex;
+
+	asString {
+		var res;
+		res = "FXUnit '%': '%'\n     %".format(id, fxStagesDesc, fxStagesChain);
+		^res;
+	}
 
 	*initClass {
 		// Populate stageDescs with format descriptions of each stage type
@@ -761,6 +784,7 @@ FXUnit {
 		};
 
 		// 3. UPDATE STATIC FX CHAIN DESCRIPTIONS
+		fxStagesDesc = desc;
 		fxStagesChain = chain;
 		fxStagesByType = stagesByType;
 
@@ -808,26 +832,64 @@ FXUnit {
 
 	}
 
-	// set individual fx stage parameters
-	// this only works once the ndef has been built..
-	//   Note: paramValue is set directly on the compiled ndef,
-	//         so paramValue can also be a nodeproxy
+
 	set {|stageName, paramName, paramValue|
 		if(ndef.notNil) {
 			var ndefParamName = "%_%".format(stageName, paramName).asSymbol;
 			var currParamVal = ndef.get(ndefParamName);
 			if(currParamVal.notNil) {
 				ndef.set(ndefParamName, paramValue);
+
+				// TODO: THIS CAN BE DANGEROUS IF THE PROXY IS BEING USED ELSEWHERE....
 				if(currParamVal.isKindOf(NodeProxy)) {
-					// if the param is currently a NodeProxy, be sure to free it..
+					// if the prev param value is a NodeProxy, be sure to free it..
 					if(FX.verbose) {
 						"Replacing NodeProxy '%' with static value".format(currParamVal).warn;
 					};
-					currParamVal.clear;
+					//currParamVal.clear;
 				};
 			} {
 				"Parameter name '%' does not exist on synth for %".format(ndefParamName, ndefid).error;
 			};
+
+		} {
+			"Cannot set FX parameters on % - build Ndef first!".format(this.id).throw;
+		};
+		^this;
+	}
+
+	// TODO: This seems to break things...
+	// set individual fx stage parameters
+	// this only works once the ndef has been built..
+	// param pairs is a name,value list of parameter pairs.. such as "hi", 0.1, "mi", 0.1, "lo", 0.1 for a rev unit.
+	//   Note: paramValue is set directly on the compiled ndef,
+	//         so paramValue can also be a nodeproxy
+	setParams {|stageName ... paramPairs|
+		if(ndef.notNil) {
+			var idx=0;
+			while {idx < paramPairs.size} {
+				var paramName = paramPairs[idx];
+				var paramValue = paramPairs[idx+1];
+				var ndefParamName = "%_%".format(stageName, paramName).asSymbol;
+				var currParamVal = ndef.get(ndefParamName);
+				if(currParamVal.notNil) {
+					ndef.set(ndefParamName, paramValue);
+
+					// TODO: THIS CAN BE DANGEROUS IF THE PROXY IS BEING USED ELSEWHERE....
+					if(currParamVal.isKindOf(NodeProxy)) {
+						// if the prev param value is a NodeProxy, be sure to free it..
+						if(FX.verbose) {
+							"Replacing NodeProxy '%' with static value".format(currParamVal).warn;
+						};
+						//currParamVal.clear;
+					};
+				} {
+					"Parameter name '%' does not exist on synth for %".format(ndefParamName, ndefid).error;
+				};
+
+				idx = idx + 2;
+			}
+
 		} {
 			"Cannot set FX parameters on % - build Ndef first!".format(this.id).throw;
 		};
