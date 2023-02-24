@@ -3,7 +3,7 @@ FX Units Livecoda
 (c) 2021 Jonathan Reus
 
 Updates:
-Nov 2022 ~ refactoring FX system into a more general AudioChainManager for managing server groups and signal chains.
+Nov 2022 ~ refactored FX system into a more general AudioChainManager for managing server groups and signal chains.
 
 */
 
@@ -12,7 +12,6 @@ Nov 2022 ~ refactoring FX system into a more general AudioChainManager for manag
 
 @usage
 a = AudioChainManager.new(s);
-
 
 f = FX.new(s, Group.new(s, \addAfter));
 f.unit(\fx2, 2, "rev(vs100 lo0.2 mi0.5 hi0.1 mx0.7)");
@@ -33,7 +32,14 @@ ws(p10 v1 mx0.99) rev(er0.8 mx0.9) ws(t2 p5 v1 mx0.9) lpf(co1200)
 
 */
 
+/*
+Wraps a FXManager with a default audio chain of server groups
+that keeps synths playing in a sensible order on the server.
 
+Provides some convenience methods for creating FX units
+and a 'play' method that allows {}.play style UGens to be
+placed within a reasonable place on the audiochain.
+*/
 AudioChainManager {
 	var <fxmanager;
 	var <server;
@@ -55,7 +61,7 @@ AudioChainManager {
 
 		"Starting AudioChainManager using: %".format(server);
 
-
+		// Audiochain initializes a FX manager with a couple useful default groups.
 		fxmanager = FX.new(server, onComplete: {|fx|
 			inputsgroup = Group.new(server, \addBefore);
 			synthgroup = Group.new(server, \addToHead);
@@ -67,7 +73,7 @@ AudioChainManager {
 		});
 	}
 
-	// Convenience method to create / modify a FX unit
+	// Convenience method to create / modify / retrieve a FX unit
 	// if desc is nil, just returns the fx unit
 	fx {|name, inChannels=2, desc|
 		^this.fxmanager.unit(name, inChannels, desc);
@@ -90,12 +96,11 @@ AudioChainManager {
 		this.fxmanager.master(outbus, gain);
 	}
 
-
 	// Wrapper around a UGEN graph, similar to {}.play but places this
 	// item into the AudioChain at a reasonable place.
-	// ugens is a ugen graph function that would otherwise be used to create an anonymouse synth with {}.play
+	// ugens is a ugen graph function that would otherwise be used to create an anonymous synth with {}.play
 	play {|ugens, outbus=0, fadeTime=0.02, addaction=\addToTail|
-		ugens.play(outbus: outbus, fadeTime: fadeTime, target: synthgroup, addAction: addaction);
+		^ugens.play(outbus: outbus, fadeTime: fadeTime, target: synthgroup, addAction: addaction);
 	}
 
 }
@@ -105,19 +110,14 @@ AudioChainManager {
 FX : SymbolProxyManager {
 	var <server;
 	var <fxgroup; // should be at the end of the server's group structure
-
 	var <units; // All FX units
-
 	var <cleanbus; // send clean signals here
-
 	var <fxbus; // used internally to send from fxmixproxy to masterSynth
-
 	var <fxmixproxy; // mixpoint of different FX busses
-
 	var <masterproxy; // final mastering, limiting & volume stage before going to audio hardware
 
 	classvar <>verbose=true;
-	classvar <>enableLimiter=true;
+	classvar <enableLimiter=true;
 	classvar <singleton;
 
 	*initClass {
@@ -137,6 +137,10 @@ FX : SymbolProxyManager {
 			singleton.freeAll;
 			singleton = nil;
 		};
+	}
+
+	*helpme {
+		FXUnit.listUnits;
 	}
 
 	freeAll {
@@ -199,18 +203,12 @@ FX : SymbolProxyManager {
 				// ], server, \addToTail);
 
 				masterproxy = NodeProxy.new(server, \audio, 2);
+				masterproxy.fadeTime = 2;
 				masterproxy.play(out: outbus, numChannels: 2, group: fxgroup, multi: false, addAction: \addToTail);
+
 				"FX.init. Setting masterproxy.source".postln;
-				masterproxy.source = {|gain=1.0|
-					var mix, fxmix, clean;
-					clean = In.ar(cleanbus, 2);
-					fxmix = fxmixproxy.ar(2);
-					mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
-					if(enableLimiter) {
-					mix = Limiter.ar(LeakDC.ar(mix), 1.0, 0.001);
-					};
-					mix * gain;
-				};
+
+				this.configure_masterproxy(enableLimiter:true, enableMonitorBadValues:false, enableMonitorSilence:false);
 
 				server.sync;
 
@@ -225,6 +223,69 @@ FX : SymbolProxyManager {
 			};
 
 		}.fork(AppClock);
+
+	}
+
+	configure_masterproxy {|enableLimiter=true, enableMonitorBadValues=false, mbvResetFreq=1, mbvAction=nil, enableMonitorSilence=false, msMaxSilence=20, msAmpThresh=0.001, msAction=nil, fadeTime=2|
+
+
+		if(enableMonitorBadValues.and {mbvAction.isNil}) {
+			mbvAction = {|err,vals,mon|
+				var min, max, sig, txt;
+				if(mon[\numchannels] === 2) {
+					min = vals[0..1]; max = vals[2..3]; sig = vals[4..5];
+					txt = "% Detected in Master Node! Sig: %   Min: %  Max: %".format(err.asString.toUpper, sig, min, max);
+				} {
+					txt = "% Detected in Master Node! Signal Value: %".format(err.asString.toUpper, vals);
+					warn("Invalid channels % in MonitorBadValues Mon: %  Vals: %".format(mon[\numchannels], mon, vals));
+				};
+				error(txt);
+			}
+		};
+
+		if(enableMonitorSilence.and {msAction.isNil}) {
+			msAction = {|err, vals, mon|
+				var errstr = "% (>%s) Detected in Master Node! %".format(err.asString.toUpper, msMaxSilence, vals);
+				error(errstr);
+			}
+		};
+
+		masterproxy.fadeTime = fadeTime;
+		masterproxy.source = {|gain=1.0|
+			var mix, fxmix, clean;
+			clean = In.ar(cleanbus, 2);
+			fxmix = fxmixproxy.ar(2);
+			mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
+
+			if(enableMonitorBadValues) {
+				MonitorBadValues.ar(
+					mix,
+					minValue: -1.0,
+					maxValue: 1.0,
+					resetFreq: mbvResetFreq,
+					monitor: \default,
+					name: "masterOOB",
+					action: mbvAction
+				);
+			};
+
+			if(enableMonitorSilence) {
+				MonitorSilence.ar(
+					mix,
+					maxSilence: msMaxSilence,
+					ampThresh: msAmpThresh,
+					monitor: \default,
+					name: "masterSilence",
+					action: msAction
+				);
+			};
+
+			if(enableLimiter) {
+				mix = Limiter.ar(LeakDC.ar(mix), 1.0, 0.001);
+			};
+			mix * gain;
+		};
+
 
 	}
 
