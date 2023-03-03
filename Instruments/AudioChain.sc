@@ -255,7 +255,8 @@ FX : SymbolProxyManager {
 			var mix, fxmix, clean;
 			clean = In.ar(cleanbus, 2);
 			fxmix = fxmixproxy.ar(2);
-			mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
+			//mix = Mix.new([fxmix, clean]); // TODO: What is cleanbus actually used for?
+			mix = fxmix * gain;
 
 			if(enableMonitorBadValues) {
 				MonitorBadValues.ar(
@@ -283,7 +284,7 @@ FX : SymbolProxyManager {
 			if(enableLimiter) {
 				mix = Limiter.ar(LeakDC.ar(mix), 1.0, 0.001);
 			};
-			mix * gain;
+			mix;
 		};
 
 
@@ -899,8 +900,11 @@ FXUnit {
 			var ndefParamName = "%_%".format(stageName, paramName).asSymbol;
 			var currParamVal = ndef.get(ndefParamName);
 			if(currParamVal.notNil) {
-				ndef.set(ndefParamName, paramValue);
 
+				ndef.set(ndefParamName, paramValue);
+				if(FX.verbose) {
+					warn("Set param:% val:%".format(ndefParamName, paramValue));
+				};
 				// TODO: THIS CAN BE DANGEROUS IF THE PROXY IS BEING USED ELSEWHERE....
 				if(currParamVal.isKindOf(NodeProxy)) {
 					// if the prev param value is a NodeProxy, be sure to free it..

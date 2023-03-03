@@ -434,7 +434,7 @@ RAVEModelManager {
 			};
 
 			// For now just remake the synth every time...
-			res = model.makeSynth(inbus:inbus, outbus:outbus, target:target, addAction:\addToTail);
+			res = model.makeSynth(inbus:inbus, outbus:outbus, targetGroup:target, addAction:\addToTail);
 
 			/*
 			TODO: If inbus/outbus change we want to modify the synth...
