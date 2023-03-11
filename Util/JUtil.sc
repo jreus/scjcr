@@ -262,10 +262,13 @@ limit on allocatable buffers.
 */
 BufferLoaderQueue {
 	var <bufsQueue; // queue of loaded buffers
+	var <bufsById; // dictionary of buffers by id, helps keep track of which bufs are still available
 	var <loadingTasks; // polling tasks that wait until buffers are loaded
 	var <maxBuffers; // maximum number of buffers before old ones start getting freed
 	var <loadingPollRate = 0.2;
 	var <activeServer;
+	var <>currentBufIdPrefix; // bufIdPrefix, gets regenerated every 30000 buffers
+	var <>currentBufId = 0; // next buffer id value, note: these ids are local to BufferLoaderQueue and not the same as SC's internal buf ids
 
 	*new {|server, size|
 		^super.new.init(server, size);
@@ -273,33 +276,59 @@ BufferLoaderQueue {
 
 	init {|server, size|
 		bufsQueue = List.new;
+		bufsById = TwoWayIdentityDictionary.new;
 		loadingTasks = List.new;
 		maxBuffers = size;
+
+		currentBufIdPrefix = Array.fill( 3, { rrand(97, 122).asAscii } ).join.asSymbol;
+
 		if(server.isNil) {
 			server = Server.default;
 		};
 		activeServer = server;
 	}
 
+	// Get a buffer by id, returns nil if no buffer exists
+	bufAt {|id|
+		^bufsById.at(id);
+	}
+
 	/*
 	Load a list of buffers
-	wavs  a list of pseudoobjects with a 'file' field containing filepath
-	done_callback  function called when buffers are loaded
+	wavs  a list of pseudoobjects/events with a 'file' field containing filepath
+	      they will get populated with status and duration fields, and a temporary buf field that will get removed in pr_cache_buf
+	allowDuplicates  if false, only loads bufs for wavs that do not already have a valid 'bufManagerId'
+	                 pointing to a buffer loaded into memory. if true, creates a duplicate buffer in the queue
+	                 even if one already exists... usually you want this to be false.
+	done_callback  function called when buffers are loaded, receives a list of buffers that were loaded
+
+	NOTE!: old bufs in the queues might be freed, it's your responsibily to make sure
+	       that if these bufs are being used elsewhere in client code they are also freed!
 	*/
-	load_bufs {|wavs, done_callback|
+	load_bufs {|wavs, allowDuplicates=false, doneAction|
 		var loadlist = List.new;
 		if(wavs.isKindOf(SequenceableCollection).not) {
 			wavs = [wavs];
 		};
 		wavs.do {|wav, idx|
-			wav.status = \loading;
-			loadlist.add(wav);
-			Buffer.read(activeServer, wav.file, action: {|bf|
-				var loadwav = wav;
-				loadwav.buf=bf;
-				loadwav.status=\ready;
-				loadwav.duration = bf.duration;
-			});
+			var isDuplicate = false, allowLoad = true;
+			if(wav.bufManagerId.notNil) {
+				if(bufsById.at(wav.bufManagerId).notNil) {
+					isDuplicate = true;
+					if(allowDuplicates.not) { allowLoad = false };
+				};
+			};
+
+			if(allowLoad) {
+				wav.status = \loading;
+				loadlist.add(wav);
+				Buffer.read(activeServer, wav.file, action: {|bf|
+					var loadwav = wav;
+					loadwav.buf=bf; // TODO: remember to free this later!
+					loadwav.status=\ready;
+					loadwav.duration = bf.duration;
+				});
+			};
 		};
 
 		// Run a thread that finishes when all buffers are loaded
@@ -314,24 +343,43 @@ BufferLoaderQueue {
 			// we use a circular buffer to cache buffers and free them
 			// after a while so that we don't just create infinite buffers
 			loading.do {|wav, idx|
-				this.cache_buf(wav.buf);
+				this.pr_cache_buf(wav);
 			};
 
 			// Finally, run callback and pass list of loaded buffers
-			done_callback.value(loading);
+			doneAction.value(loading);
 		}.fork(AppClock));
 
 	}
 
+
 	// private function, adds a new buffer to the queue
+	//   expects a pseudoobject with a 'buf' field containing the loaded buffer
+	// it will get populated with bufManagerId, bufManager,  populated
 	// removes and frees the oldest buffer if maxBuffers is reached
-	cache_buf {|newbuf|
-		var oldbuf;
+	pr_cache_buf {|pobj|
+		var oldbuf, oldbufid, newbuf;
+
+		// If we're out of space, pop the oldest buf from queue & dictionary
 		if(bufsQueue.size >= maxBuffers) {
 			oldbuf = bufsQueue.pop;
+			oldbufid = bufsById.getID(oldbuf);
+			bufsById.removeAt(oldbufid);
 		};
-		bufsQueue.addFirst(newbuf);
-		if(oldbuf.notNil) { oldbuf.free };
+
+		// Generate a new id & add the new buf
+		pobj.bufManagerId = (currentBufIdPrefix.asString ++ currentBufId).asSymbol;
+		currentBufId = currentBufId + 1;
+		if(currentBufId > 10000) {
+			currentBufIdPrefix = Array.fill( 3, { rrand(97, 122).asAscii } ).join.asSymbol;
+			currentBufId = 0;
+		};
+		pobj.bufManager = this; // add a reference to the buf manager, the buf should only be referenced here from now on!!
+		newbuf = pobj.buf;
+		pobj.removeAt(\buf); // remove the buf key, the BufManager should be used instead to access the buffer
+		bufsQueue.addFirst(newbuf); // push on to the queue
+		bufsById.put(pobj.bufManagerId, newbuf); // put into the dictionary
+		if(oldbuf.notNil) { oldbuf.free }; // finally, free the old buf from the server & return it
 		^oldbuf;
 	}
 
